@@ -35,6 +35,12 @@ var (
 		Lengths:  map[uint]uint64{eth65: 17, eth64: 17, eth63: 17},
 	}
 
+	ApolloProtocol = Protocol{
+		Name:     "eth",
+		Versions: []uint{eth65, eth64, eth63},
+		Lengths:  map[uint]uint64{eth65: 17, eth64: 17, eth63: 17},
+	}
+
 	// Default: Keep up-to-date with eth/protocol.go
 	EthProtocol = Protocol{
 		Name:     "eth",
