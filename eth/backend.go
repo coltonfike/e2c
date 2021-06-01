@@ -29,8 +29,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/consensus/apollo"
 	"github.com/ethereum/go-ethereum/consensus/clique"
+	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/istanbul"
 	istanbulBackend "github.com/ethereum/go-ethereum/consensus/istanbul/backend"
@@ -296,9 +296,9 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 		return clique.New(chainConfig.Clique, db)
 	}
 
-	if chainConfig.Apollo != nil {
-		chainConfig.Apollo.AllowedFutureBlockTime = config.Miner.AllowedFutureBlockTime //Quorum
-		return apollo.New(chainConfig.Apollo, db)
+	if chainConfig.E2C != nil {
+		chainConfig.E2C.AllowedFutureBlockTime = config.Miner.AllowedFutureBlockTime //Quorum
+		return e2c.New(chainConfig.E2C, db)
 	}
 	// If Istanbul is requested, set it up
 	if chainConfig.Istanbul != nil {
@@ -469,7 +469,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool {
 		return false
 	}
 
-	if _, ok := s.engine.(*apollo.Clique); ok {
+	if _, ok := s.engine.(*e2c.E2C); ok {
 		return false
 	}
 
@@ -526,13 +526,13 @@ func (s *Ethereum) StartMining(threads int) error {
 			}
 			clique.Authorize(eb, wallet.SignData)
 		}
-		if apollo, ok := s.engine.(*apollo.Clique); ok {
+		if e2c, ok := s.engine.(*e2c.E2C); ok {
 			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
 			if wallet == nil || err != nil {
 				log.Error("Etherbase account unavailable locally", "err", err)
 				return fmt.Errorf("signer missing: %v", err)
 			}
-			apollo.Authorize(eb, wallet.SignData)
+			e2c.Authorize(eb, wallet.SignData)
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.

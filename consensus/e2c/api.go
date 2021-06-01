@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package apollo
+package e2c
 
 import (
 	"errors"
@@ -29,8 +29,8 @@ import (
 // API is a user facing RPC API to allow controlling the signer and voting
 // mechanisms of the proof-of-authority scheme.
 type API struct {
-	chain  consensus.ChainHeaderReader
-	clique *Clique
+	chain consensus.ChainHeaderReader
+	e2c   *E2C
 }
 
 // GetSnapshot retrieves the state snapshot at a given block.
@@ -46,7 +46,7 @@ func (api *API) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	if header == nil {
 		return nil, errUnknownBlock
 	}
-	return api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+	return api.e2c.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
 }
 
 // GetSnapshotAtHash retrieves the state snapshot at a given block.
@@ -55,7 +55,7 @@ func (api *API) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 	if header == nil {
 		return nil, errUnknownBlock
 	}
-	return api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+	return api.e2c.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
 }
 
 // GetSigners retrieves the list of authorized signers at the specified block.
@@ -71,7 +71,7 @@ func (api *API) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
 	if header == nil {
 		return nil, errUnknownBlock
 	}
-	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.e2c.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (api *API) GetSignersAtHash(hash common.Hash) ([]common.Address, error) {
 	if header == nil {
 		return nil, errUnknownBlock
 	}
-	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.e2c.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -93,11 +93,11 @@ func (api *API) GetSignersAtHash(hash common.Hash) ([]common.Address, error) {
 
 // Proposals returns the current proposals the node tries to uphold and vote on.
 func (api *API) Proposals() map[common.Address]bool {
-	api.clique.lock.RLock()
-	defer api.clique.lock.RUnlock()
+	api.e2c.lock.RLock()
+	defer api.e2c.lock.RUnlock()
 
 	proposals := make(map[common.Address]bool)
-	for address, auth := range api.clique.proposals {
+	for address, auth := range api.e2c.proposals {
 		proposals[address] = auth
 	}
 	return proposals
@@ -106,19 +106,19 @@ func (api *API) Proposals() map[common.Address]bool {
 // Propose injects a new authorization proposal that the signer will attempt to
 // push through.
 func (api *API) Propose(address common.Address, auth bool) {
-	api.clique.lock.Lock()
-	defer api.clique.lock.Unlock()
+	api.e2c.lock.Lock()
+	defer api.e2c.lock.Unlock()
 
-	api.clique.proposals[address] = auth
+	api.e2c.proposals[address] = auth
 }
 
 // Discard drops a currently running proposal, stopping the signer from casting
 // further votes (either for or against).
 func (api *API) Discard(address common.Address) {
-	api.clique.lock.Lock()
-	defer api.clique.lock.Unlock()
+	api.e2c.lock.Lock()
+	defer api.e2c.lock.Unlock()
 
-	delete(api.clique.proposals, address)
+	delete(api.e2c.proposals, address)
 }
 
 type Status struct {
@@ -169,7 +169,7 @@ func (api *API) Status(startBlockNum *rpc.BlockNumber, endBlockNum *rpc.BlockNum
 		header = api.chain.GetHeaderByNumber(end)
 	}
 
-	snap, err := api.clique.snapshot(api.chain, end, header.Hash(), nil)
+	snap, err := api.e2c.snapshot(api.chain, end, header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func (api *API) Status(startBlockNum *rpc.BlockNumber, endBlockNum *rpc.BlockNum
 			optimals++
 		}
 		diff += h.Difficulty.Uint64()
-		sealer, err := api.clique.Author(h)
+		sealer, err := api.e2c.Author(h)
 		if err != nil {
 			return nil, err
 		}

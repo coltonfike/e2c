@@ -59,7 +59,7 @@ func (w *wizard) makeGenesis() {
 	fmt.Println("Which consensus engine to use? (default = clique)")
 	fmt.Println(" 1. Ethash - proof-of-work")
 	fmt.Println(" 2. Clique - proof-of-authority")
-	fmt.Println(" 3. Apollo - proof-of-authority")
+	fmt.Println(" 3. E2C - proof-of-authority")
 
 	choice := w.read()
 	switch {
@@ -106,43 +106,31 @@ func (w *wizard) makeGenesis() {
 			copy(genesis.ExtraData[32+i*common.AddressLength:], signer[:])
 		}
 
+		// E2C protocol
 	case choice == "3":
-		// In the case of clique, configure the consensus parameters
 		genesis.Difficulty = big.NewInt(1)
-		genesis.Config.Apollo = &params.ApolloConfig{
+		genesis.Config.E2C = &params.E2CConfig{
 			Period: 15,
 			Epoch:  30000,
 		}
 		fmt.Println()
 		fmt.Println("How many seconds should blocks take? (default = 15)")
-		genesis.Config.Apollo.Period = uint64(w.readDefaultInt(15))
+		genesis.Config.E2C.Period = uint64(w.readDefaultInt(15))
 
 		// We also need the initial list of signers
 		fmt.Println()
-		fmt.Println("Which accounts are allowed to seal? (mandatory at least one)")
+		fmt.Println("Which account is allowed to seal? (mandatory)")
 
-		var signers []common.Address
+		var signer common.Address
 		for {
 			if address := w.readAddress(); address != nil {
-				signers = append(signers, *address)
-				continue
-			}
-			if len(signers) > 0 {
+				signer = *address
 				break
 			}
 		}
 		// Sort the signers and embed into the extra-data section
-		for i := 0; i < len(signers); i++ {
-			for j := i + 1; j < len(signers); j++ {
-				if bytes.Compare(signers[i][:], signers[j][:]) > 0 {
-					signers[i], signers[j] = signers[j], signers[i]
-				}
-			}
-		}
-		genesis.ExtraData = make([]byte, 32+len(signers)*common.AddressLength+65)
-		for i, signer := range signers {
-			copy(genesis.ExtraData[32+i*common.AddressLength:], signer[:])
-		}
+		genesis.ExtraData = make([]byte, 32+common.AddressLength+65)
+		copy(genesis.ExtraData[32:], signer[:])
 
 	default:
 		log.Crit("Invalid consensus engine choice", "choice", choice)

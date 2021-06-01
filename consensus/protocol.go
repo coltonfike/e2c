@@ -35,7 +35,7 @@ var (
 		Lengths:  map[uint]uint64{eth65: 17, eth64: 17, eth63: 17},
 	}
 
-	ApolloProtocol = Protocol{
+	E2CProtocol = Protocol{
 		Name:     "eth",
 		Versions: []uint{eth65, eth64, eth63},
 		Lengths:  map[uint]uint64{eth65: 17, eth64: 17, eth63: 17},

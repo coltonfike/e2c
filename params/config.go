@@ -336,7 +336,7 @@ type ChainConfig struct {
 	Ethash   *EthashConfig   `json:"ethash,omitempty"`
 	Clique   *CliqueConfig   `json:"clique,omitempty"`
 	Istanbul *IstanbulConfig `json:"istanbul,omitempty"`
-	Apollo   *ApolloConfig   `json:"apollo,omitempty"`
+	E2C      *E2CConfig      `json:"e2c,omitempty"`
 
 	IsQuorum             bool   `json:"isQuorum"`     // Quorum flag
 	TransactionSizeLimit uint64 `json:"txnSizeLimit"` // Quorum - transaction size limit
@@ -375,14 +375,14 @@ func (c *CliqueConfig) String() string {
 }
 
 // Apollo Config Testing
-type ApolloConfig struct {
+type E2CConfig struct {
 	Period                 uint64 `json:"period"`                 // Number of seconds between blocks to enforce
 	Epoch                  uint64 `json:"epoch"`                  // Epoch length to reset votes and checkpoint
 	AllowedFutureBlockTime uint64 `json:"allowedFutureBlockTime"` // Max time (in seconds) from current time allowed for blocks, before they're considered future blocks
 }
 
-func (c *ApolloConfig) String() string {
-	return "apollo"
+func (c *E2CConfig) String() string {
+	return "e2c"
 }
 
 // IstanbulConfig is the consensus engine configs for Istanbul based sealing.
