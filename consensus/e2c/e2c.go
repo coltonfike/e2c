@@ -181,6 +181,8 @@ type E2C struct {
 	signFn SignerFn       // Signer function to authorize hashes with
 	lock   sync.RWMutex   // Protects the signer fields
 
+	broadcaster consensus.Broadcaster // Protocol Manager
+
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
 }

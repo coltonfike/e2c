@@ -71,6 +71,8 @@ type Broadcaster interface {
 	Enqueue(id string, block *types.Block)
 	// FindPeers retrives peers by addresses
 	FindPeers(map[common.Address]bool) map[common.Address]Peer
+
+	BroadcastBlock(block *types.Block, propagate bool)
 }
 
 // Peer defines the interface to communicate with peer

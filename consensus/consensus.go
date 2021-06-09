@@ -138,6 +138,10 @@ type Handler interface {
 	SetBroadcaster(Broadcaster)
 }
 
+type NewBlockHandler interface {
+	HandleNewBlock(block *types.Block, id string, mark func(common.Hash), hash common.Hash) (bool, error)
+}
+
 // PoW is a consensus engine based on proof-of-work.
 type PoW interface {
 	Engine
