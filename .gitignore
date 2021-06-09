@@ -55,3 +55,5 @@ generated-release-notes.md
 
 # Mine
 package-lock.json
+testnet/node*/geth
+testnet/node*/static-nodes.json
