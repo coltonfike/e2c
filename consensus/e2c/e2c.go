@@ -182,6 +182,7 @@ type E2C struct {
 	lock   sync.RWMutex   // Protects the signer fields
 
 	broadcaster consensus.Broadcaster // Protocol Manager
+	handler     *E2CHandler
 
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
@@ -199,13 +200,17 @@ func New(config *params.E2CConfig, db ethdb.Database) *E2C {
 	recents, _ := lru.NewARC(inmemorySnapshots)
 	signatures, _ := lru.NewARC(inmemorySignatures)
 
-	return &E2C{
+	e2c := &E2C{
 		config:     &conf,
 		db:         db,
 		recents:    recents,
 		signatures: signatures,
 		proposals:  make(map[common.Address]bool),
 	}
+
+	e2c.handler = NewE2CHandler(e2c)
+	e2c.handler.Start()
+	return e2c
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
