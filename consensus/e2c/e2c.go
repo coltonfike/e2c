@@ -35,6 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -184,6 +185,9 @@ type E2C struct {
 	broadcaster consensus.Broadcaster // Protocol Manager
 	handler     *E2CHandler
 
+	eventMux *event.TypeMux
+	delta    int
+
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
 }
@@ -206,6 +210,8 @@ func New(config *params.E2CConfig, db ethdb.Database) *E2C {
 		recents:    recents,
 		signatures: signatures,
 		proposals:  make(map[common.Address]bool),
+		eventMux:   new(event.TypeMux),
+		delta:      1,
 	}
 
 	e2c.handler = NewE2CHandler(e2c)
@@ -625,7 +631,6 @@ func (c *E2C) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	}
 	// Sign all the things!
 
-	// Check what the Clique things are here!!!
 	sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, E2CRLP(header))
 	if err != nil {
 		return err
@@ -678,6 +683,7 @@ func (c *E2C) SealHash(header *types.Header) common.Hash {
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *E2C) Close() error {
+	c.handler.Stop()
 	return nil
 }
 
