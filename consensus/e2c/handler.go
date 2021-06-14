@@ -127,7 +127,6 @@ func (h *E2CHandler) commit(block common.Hash) error {
 		if len(h.ackedBlocks[block]) >= h.e2c.f {
 			h.e2c.broadcaster.InsertBlock(h.queuedBlocks[block].block)
 			fmt.Println("Successfully committed block", h.queuedBlocks[block].block.Number().String())
-			h.delete(block)
 		} else {
 			if err := h.resetTimer(); err != nil {
 				fmt.Println("Insufficient acks for block", h.queuedBlocks[block].block.Number().String(), "Block is rejected")
@@ -140,6 +139,7 @@ func (h *E2CHandler) commit(block common.Hash) error {
 		}
 
 		if ancestor, exists := h.ancestorBlocks[block]; exists {
+			h.delete(block)
 			block = ancestor
 		} else {
 			return nil

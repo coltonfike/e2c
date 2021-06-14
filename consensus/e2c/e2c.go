@@ -211,7 +211,7 @@ func New(config *params.E2CConfig, db ethdb.Database) *E2C {
 		signatures: signatures,
 		proposals:  make(map[common.Address]bool),
 		eventMux:   new(event.TypeMux),
-		delta:      10,
+		delta:      1,
 		f:          2,
 	}
 
