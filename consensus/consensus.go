@@ -138,8 +138,10 @@ type Handler interface {
 	SetBroadcaster(Broadcaster)
 }
 
-type NewBlockHandler interface {
-	HandleNewBlock(block *types.Block, id string, mark func(common.Hash), hash common.Hash) (bool, error)
+type E2CHandler interface {
+	HandleMsg(p Peer, data p2p.Msg) (bool, error)
+	NewChainHead() error
+	SetBroadcaster(Broadcaster)
 }
 
 // PoW is a consensus engine based on proof-of-work.

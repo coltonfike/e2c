@@ -128,6 +128,8 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 	// Quorum
 	if handler, ok := manager.engine.(consensus.Handler); ok {
 		handler.SetBroadcaster(manager)
+	} else if handler, ok := manager.engine.(consensus.E2CHandler); ok {
+		handler.SetBroadcaster(manager)
 	}
 	// /Quorum
 
@@ -450,6 +452,11 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		pubKey := p.Node().Pubkey()
 		addr := crypto.PubkeyToAddress(*pubKey)
 		handled, err := handler.HandleMsg(addr, msg)
+		if handled {
+			return err
+		}
+	} else if handler, ok := pm.engine.(consensus.E2CHandler); ok { // E2C Handler
+		handled, err := handler.HandleMsg(p, msg)
 		if handled {
 			return err
 		}
@@ -792,16 +799,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		request.Block.ReceivedAt = msg.ReceivedAt
 		request.Block.ReceivedFrom = p
 
-		if handler, ok := pm.engine.(consensus.NewBlockHandler); ok { // quorum: NewBlock required for consensus, e.g. "istanbul"
-			handled, err := handler.HandleNewBlock(request.Block, p.id, p.MarkBlock, request.Block.Hash())
-			if handled {
-				return err
-			}
-		} else {
-			// Mark the peer as owning the block and schedule it for import
-			p.MarkBlock(request.Block.Hash())
-			pm.blockFetcher.Enqueue(p.id, request.Block)
-		}
+		// Mark the peer as owning the block and schedule it for import
+		p.MarkBlock(request.Block.Hash())
+		pm.blockFetcher.Enqueue(p.id, request.Block)
 
 		// Assuming the block is importable by the peer, but possibly not yet done so,
 		// calculate the head hash and TD that the peer truly must have.
@@ -915,12 +915,11 @@ func (pm *ProtocolManager) BroadcastBlock(block *types.Block, propagate bool) {
 		}
 		// Send the block to a subset of our peers
 
-		if _, ok := pm.engine.(consensus.NewBlockHandler); ok { // quorum: NewBlock required for consensus, e.g. "istanbul"
+		if _, ok := pm.engine.(consensus.E2CHandler); ok { // E2C: Send message to all peers
 			for _, peer := range peers {
 				peer.AsyncSendNewBlock(block, td)
 			}
 		} else {
-
 			transfer := peers[:int(math.Sqrt(float64(len(peers))))]
 			for _, peer := range transfer {
 				peer.AsyncSendNewBlock(block, td)
@@ -1083,3 +1082,29 @@ func (self *ProtocolManager) FindPeers(targets map[common.Address]bool) map[comm
 }
 
 // End Quorum
+
+// Basically the same method as defined in New, but moved out for access by E2C
+func (pm *ProtocolManager) InsertBlock(block *types.Block) (int, error) {
+	blocks := []*types.Block{block}
+	if pm.blockchain.CurrentBlock().NumberU64() < pm.checkpointNumber {
+		log.Warn("Unsynced yet, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
+		return 0, nil
+	}
+	n, err := pm.blockchain.InsertChain(blocks)
+	if err == nil {
+		atomic.StoreUint32(&pm.acceptTxs, 1)
+	}
+	return n, err
+}
+
+func (pm *ProtocolManager) VerifyHeader(header *types.Header) error {
+	return pm.engine.VerifyHeader(pm.blockchain, header, true)
+}
+
+func (pm *ProtocolManager) BroadcastMsg(msgCode uint64, data interface{}) {
+	for _, peer := range pm.peers.peers {
+		if err := peer.Send(msgCode, data); err != nil {
+			fmt.Println("Error sending ack:", err)
+		}
+	}
+}

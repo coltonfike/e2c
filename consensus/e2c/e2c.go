@@ -20,6 +20,7 @@ package e2c
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
@@ -49,8 +50,6 @@ const (
 	checkpointInterval = 1024 // Number of blocks after which to save the vote snapshot to the database
 	inmemorySnapshots  = 128  // Number of recent vote snapshots to keep in memory
 	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
-
-	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
 )
 
 // Clique proof-of-authority protocol constants.
@@ -187,6 +186,7 @@ type E2C struct {
 
 	eventMux *event.TypeMux
 	delta    int
+	f        int
 
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
@@ -211,7 +211,8 @@ func New(config *params.E2CConfig, db ethdb.Database) *E2C {
 		signatures: signatures,
 		proposals:  make(map[common.Address]bool),
 		eventMux:   new(event.TypeMux),
-		delta:      1,
+		delta:      10,
+		f:          2,
 	}
 
 	e2c.handler = NewE2CHandler(e2c)
@@ -620,38 +621,15 @@ func (c *E2C) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		return errUnauthorizedSigner
 	}
 
-	// Sweet, the protocol permits us to sign the block, wait for our time
-	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
-	if header.Difficulty.Cmp(diffNoTurn) == 0 {
-		// It's not our turn explicitly to sign, delay it a bit
-		wiggle := time.Duration(1) * wiggleTime
-		delay += time.Duration(rand.Int63n(int64(wiggle)))
-
-		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
-	}
 	// Sign all the things!
-
 	sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, E2CRLP(header))
 	if err != nil {
 		return err
 	}
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
-	// Wait until sealing is terminated or delay timeout.
-	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-	go func() {
-		select {
-		case <-stop:
-			return
-		case <-time.After(delay):
-		}
+	results <- block.WithSeal(header)
 
-		select {
-		case results <- block.WithSeal(header):
-		default:
-			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
-		}
-	}()
-
+	fmt.Println("Successfully sealed block " + block.Number().String())
 	return nil
 }
 

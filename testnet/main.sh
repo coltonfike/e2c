@@ -37,7 +37,7 @@ generate_static_nodes() {
 
 # runs a node, needs the directory name, address, port number, http port number, and nodekey
 run_node() {
-  echo -e "$1 Output:\n\n" > logs/logs_$5.txt 
+  echo -e "$1 Output:\n" > logs/logs_$5.txt 
   geth --datadir $1/ --verbosity 0 --nodiscover --networkid 765567 --port $3 --mine --http --http.addr 'localhost' --http.port $4 --http.api admin,eth,miner,net,txpool,personal,web3 --allow-insecure-unlock --unlock $2 --password $1/password.txt >> logs/logs_$5.txt 2>&1
 }
 

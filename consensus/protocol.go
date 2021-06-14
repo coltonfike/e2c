@@ -73,13 +73,20 @@ type Broadcaster interface {
 	FindPeers(map[common.Address]bool) map[common.Address]Peer
 
 	BroadcastBlock(block *types.Block, propagate bool)
+	InsertBlock(block *types.Block) (int, error)
+	VerifyHeader(header *types.Header) error
+	BroadcastMsg(msgCode uint64, data interface{})
 }
 
 // Peer defines the interface to communicate with peer
 type Peer interface {
+
 	// Send sends the message to this peer
 	Send(msgcode uint64, data interface{}) error
 
 	// SendConsensus sends the message to this p2p peer using the consensus specific devp2p subprotocol
 	SendConsensus(msgcode uint64, data interface{}) error
+
+	MarkBlock(hash common.Hash)
+	String() string
 }
