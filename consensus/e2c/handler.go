@@ -36,17 +36,16 @@ const (
 )
 
 type E2CHandler struct {
-	e2c          *E2C
-	commitTimer  *time.Timer              // alert when a blocks timer expires
-	nextBlock    common.Hash              // Next block whose timer will go off
-	queuedBlocks map[common.Hash]struct { // this is the queue of all blocks not yet committed
+	e2c           *E2C
+	commitTimer   *time.Timer // alert when a blocks timer expires
+	progressTimer *ProgressTimer
+	nextBlock     common.Hash              // Next block whose timer will go off
+	queuedBlocks  map[common.Hash]struct { // this is the queue of all blocks not yet committed
 		block *types.Block
 		time  time.Time
 	}
-	ancestorBlocks map[common.Hash]common.Hash         // Allows for tracking ancestors
-	ackedBlocks    map[common.Hash]map[string]struct{} // tracks the acks for a block
-	eventMux       *event.TypeMuxSubscription
-	handlerwg      *sync.WaitGroup
+	eventMux  *event.TypeMuxSubscription
+	handlerwg *sync.WaitGroup
 }
 
 func NewE2CHandler(e2c *E2C) *E2CHandler {
@@ -56,14 +55,13 @@ func NewE2CHandler(e2c *E2C) *E2CHandler {
 			block *types.Block
 			time  time.Time
 		}),
-		ancestorBlocks: make(map[common.Hash]common.Hash),
-		ackedBlocks:    make(map[common.Hash]map[string]struct{}),
-		handlerwg:      new(sync.WaitGroup),
+		handlerwg: new(sync.WaitGroup),
 	}
 }
 
 func (h *E2CHandler) Start() {
 	h.commitTimer = time.NewTimer(time.Millisecond)
+	h.progressTimer = NewProgressTimer(4 * time.Duration(h.e2c.delta) * time.Second)
 	h.subscribeEvents()
 	go h.loop()
 }
@@ -97,11 +95,6 @@ func (h *E2CHandler) loop() {
 				if err := h.handleBlock(ev.block); err != nil {
 					fmt.Println("Problem handling block:", err)
 				}
-
-			case Ack:
-				if err := h.handleAck(ev.id, ev.block); err != nil {
-					fmt.Println("Problem handling ack:", err)
-				}
 			}
 
 		case <-h.commitTimer.C:
@@ -117,34 +110,22 @@ func (h *E2CHandler) loop() {
 			if err := h.resetTimer(); err != nil {
 				fmt.Println("Problem handling timer:", err)
 			}
+
+		case <-h.progressTimer.timer.C:
+			fmt.Println("Progress Timer expired! Sending Blame message!")
 		}
 	}
 }
 
 func (h *E2CHandler) commit(block common.Hash) error {
 
-	for {
-		if len(h.ackedBlocks[block]) >= h.e2c.f {
-			h.e2c.broadcaster.InsertBlock(h.queuedBlocks[block].block)
-			fmt.Println("Successfully committed block", h.queuedBlocks[block].block.Number().String())
-		} else {
-			if err := h.resetTimer(); err != nil {
-				fmt.Println("Insufficient acks for block", h.queuedBlocks[block].block.Number().String(), "Block is rejected")
-				h.delete(block)
-				return errors.New("Block not committed!")
-			} else {
-				fmt.Println("Insufficient acks for block", h.queuedBlocks[block].block.Number().String(), ", waiting for more!")
-				return nil
-			}
-		}
-
-		if ancestor, exists := h.ancestorBlocks[block]; exists {
-			h.delete(block)
-			block = ancestor
-		} else {
-			return nil
-		}
+	if _, err := h.e2c.broadcaster.InsertBlock(h.queuedBlocks[block].block); err != nil {
+		h.delete(block)
+		return err
 	}
+	fmt.Println("Successfully committed block", h.queuedBlocks[block].block.Number().String())
+	h.delete(block)
+	return nil
 }
 
 func (h *E2CHandler) handleBlock(block *types.Block) error {
@@ -161,11 +142,11 @@ func (h *E2CHandler) handleBlock(block *types.Block) error {
 	}
 
 	fmt.Println("Valid block", block.Number().String(), "received!")
+	h.progressTimer.AddDuration(2 * time.Duration(h.e2c.delta) * time.Second)
 	go h.e2c.broadcaster.BroadcastBlock(block, false)
-	go h.e2c.broadcaster.BroadcastMsg(AckMsg, block.Hash())
 
 	if len(h.queuedBlocks) == 0 {
-		h.commitTimer.Reset(time.Duration(h.e2c.delta) * time.Second)
+		h.commitTimer.Reset(2 * time.Duration(h.e2c.delta) * time.Second)
 		h.nextBlock = block.Hash()
 	}
 
@@ -176,24 +157,6 @@ func (h *E2CHandler) handleBlock(block *types.Block) error {
 		block: block,
 		time:  time.Now(),
 	}
-	h.ancestorBlocks[block.ParentHash()] = block.Hash()
-	h.ackedBlocks[block.Hash()] = make(map[string]struct{})
-	return nil
-}
-
-func (h *E2CHandler) handleAck(id string, block common.Hash) error {
-	// TODO: Small bug here where the ack is received before block, currently needed
-	// to stop the proposer from crashing since they don't receive any blocks
-	if _, exists := h.ackedBlocks[block]; !exists {
-		return nil
-	}
-
-	if _, exists := h.ackedBlocks[block][id]; !exists {
-		h.ackedBlocks[block][id] = struct{}{}
-		fmt.Println("Ack for block", h.queuedBlocks[block].block.Number().String(), ": Total acks:", len(h.ackedBlocks[block]))
-		return nil
-	}
-	fmt.Println("Duplicate ack for block", h.queuedBlocks[block].block.Number().String(), ": Total acks:", len(h.ackedBlocks[block]))
 	return nil
 }
 
@@ -208,7 +171,7 @@ func (h *E2CHandler) resetTimer() error {
 		}
 	}
 
-	d := time.Until(earliestTime.Add(time.Duration(h.e2c.delta) * time.Second))
+	d := time.Until(earliestTime.Add(2 * time.Duration(h.e2c.delta) * time.Second))
 	if d <= 0 {
 		return errors.New("Timer already expired")
 	}
@@ -220,9 +183,7 @@ func (h *E2CHandler) resetTimer() error {
 }
 
 func (h *E2CHandler) delete(block common.Hash) {
-	delete(h.ancestorBlocks, block)
 	delete(h.queuedBlocks, block)
-	delete(h.ackedBlocks, block)
 }
 
 func (e2c *E2C) HandleMsg(p consensus.Peer, msg p2p.Msg) (bool, error) {
