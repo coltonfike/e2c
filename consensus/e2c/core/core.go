@@ -2,10 +2,13 @@ package core
 
 import (
 	"errors"
+	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/event"
@@ -20,9 +23,10 @@ type Core struct {
 		block *types.Block
 		time  time.Time
 	}
-	eventMux  *event.TypeMuxSubscription
-	handlerwg *sync.WaitGroup
-	delta     time.Duration
+	eventMux       *event.TypeMuxSubscription
+	handlerwg      *sync.WaitGroup
+	delta          time.Duration
+	expectedHeight *big.Int
 }
 
 func New(e2c e2c.Engine, delta int) *Core {
@@ -32,8 +36,9 @@ func New(e2c e2c.Engine, delta int) *Core {
 			block *types.Block
 			time  time.Time
 		}),
-		handlerwg: new(sync.WaitGroup),
-		delta:     time.Duration(delta),
+		handlerwg:      new(sync.WaitGroup),
+		delta:          time.Duration(delta),
+		expectedHeight: big.NewInt(1), // TODO: Make this look for the block at the top of the chain!!!!
 	}
 	core.Start()
 	return core
@@ -59,6 +64,7 @@ func (c *Core) Stop() error {
 	c.handlerwg.Wait()
 	return nil
 }
+
 func (c *Core) resetTimer() error {
 	earliestTime := time.Now()
 	var earliestBlock common.Hash
@@ -78,6 +84,30 @@ func (c *Core) resetTimer() error {
 	c.commitTimer.Reset(d)
 	c.nextBlock = earliestBlock
 
+	return nil
+}
+
+func (c *Core) verify(block *types.Block) error {
+
+	if err := c.e2c.Verify(block.Header()); err != nil {
+		if err != consensus.ErrUnknownAncestor {
+			return err
+		}
+
+		parent, exists := c.queuedBlocks[block.ParentHash()]
+		if !exists {
+			fmt.Println("Blocks Arrived Out of Order")
+			return nil // TODO: Return Error
+		}
+		// check this again, as it hasn't been checked due to there not being a parent
+		if parent.block.Number().Uint64()+1 != block.Number().Uint64() {
+			return err
+		}
+		// All ok, check equivocation
+	}
+	if block.Number().Uint64() != c.expectedHeight.Uint64() {
+		return errors.New("Already received block at this height")
+	}
 	return nil
 }
 

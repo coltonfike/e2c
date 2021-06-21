@@ -16,12 +16,11 @@
 package core
 
 import (
-	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -75,20 +74,7 @@ func (c *Core) handleCommit(block common.Hash) error {
 
 func (c *Core) handleBlock(block *types.Block) error {
 
-	err := c.e2c.Verify(block.Header())
-	if err == consensus.ErrUnknownAncestor {
-		parent, exists := c.queuedBlocks[block.ParentHash()]
-		if !exists {
-			fmt.Println("Blocks Arrived Out of Order")
-			return nil //c.e2c.RequestBlock(block.ParentHash())
-		}
-
-		if parent.block.Number().Uint64()+1 != block.Number().Uint64() {
-			return errors.New("Already Received block with this number")
-		}
-	} else if err != nil {
-		return err
-	}
+	c.verify(block) // TODO: Handle potential errors from this
 
 	fmt.Println("Valid block", block.Number().String(), "received!")
 	c.progressTimer.AddDuration(2 * c.delta * time.Second)
@@ -106,5 +92,7 @@ func (c *Core) handleBlock(block *types.Block) error {
 		block: block,
 		time:  time.Now(),
 	}
+
+	c.expectedHeight.Add(c.expectedHeight, big.NewInt(1))
 	return nil
 }
