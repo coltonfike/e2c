@@ -74,9 +74,8 @@ func (e2c *E2C) Verify(header *types.Header) error {
 	// If the block is a checkpoint block, verify the signer list
 	if number%e2c.config.Epoch == 0 {
 		signers := make([]byte, common.AddressLength)
-		for i, signer := range snap.signers() {
-			copy(signers[i*common.AddressLength:], signer[:])
-		}
+		signer := snap.signer()
+		copy(signers[common.AddressLength:], signer[:])
 		extraSuffix := len(header.Extra) - extraSeal
 		if !bytes.Equal(header.Extra[extraVanity:extraSuffix], signers) {
 			return errMismatchingCheckpointSigners

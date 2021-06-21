@@ -60,9 +60,10 @@ func (api *API) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 }
 
 // GetSigners retrieves the list of authorized signers at the specified block.
-func (api *API) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
+func (api *API) GetSigner(number *rpc.BlockNumber) (common.Address, error) {
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
+	var a common.Address
 	if number == nil || *number == rpc.LatestBlockNumber {
 		header = api.chain.CurrentHeader()
 	} else {
@@ -70,26 +71,27 @@ func (api *API) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
 	}
 	// Ensure we have an actually valid block and return the signers from its snapshot
 	if header == nil {
-		return nil, errUnknownBlock
+		return a, errUnknownBlock
 	}
 	snap, err := api.e2c.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
-		return nil, err
+		return a, err
 	}
-	return snap.signers(), nil
+	return snap.signer(), nil
 }
 
 // GetSignersAtHash retrieves the list of authorized signers at the specified block.
-func (api *API) GetSignersAtHash(hash common.Hash) ([]common.Address, error) {
+func (api *API) GetSignerAtHash(hash common.Hash) (common.Address, error) {
 	header := api.chain.GetHeaderByHash(hash)
+	var a common.Address
 	if header == nil {
-		return nil, errUnknownBlock
+		return a, errUnknownBlock
 	}
 	snap, err := api.e2c.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
-		return nil, err
+		return a, err
 	}
-	return snap.signers(), nil
+	return snap.signer(), nil
 }
 
 // Proposals returns the current proposals the node tries to uphold and vote on.
@@ -175,16 +177,14 @@ func (api *API) Status(startBlockNum *rpc.BlockNumber, endBlockNum *rpc.BlockNum
 		return nil, err
 	}
 	var (
-		signers = snap.signers()
+		signers = snap.signer()
 	)
 	if numBlocks > end {
 		start = 1
 		numBlocks = end - start
 	}
 	signStatus := make(map[common.Address]int)
-	for _, s := range signers {
-		signStatus[s] = 0
-	}
+	signStatus[signers] = 0
 	for n := start; n < end; n++ {
 		h := api.chain.GetHeaderByNumber(n)
 		if h == nil {

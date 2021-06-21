@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -131,10 +130,6 @@ var (
 
 	// errUnauthorizedSigner is returned if a header is signed by a non-authorized entity.
 	errUnauthorizedSigner = errors.New("unauthorized signer")
-
-	// errRecentlySigned is returned if a header is signed by an authorized entity
-	// that already signed a header recently, thus is temporarily not allowed to.
-	errRecentlySigned = errors.New("recently signed")
 )
 
 // SignerFn hashes and signs the data to be signed by a backing account.
@@ -345,9 +340,8 @@ func (c *E2C) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	// If the block is a checkpoint block, verify the signer list
 	if number%c.config.Epoch == 0 {
 		signers := make([]byte, common.AddressLength)
-		for i, signer := range snap.signers() {
-			copy(signers[i*common.AddressLength:], signer[:])
-		}
+		signer := snap.signer()
+		copy(signers[common.AddressLength:], signer[:])
 		extraSuffix := len(header.Extra) - extraSeal
 		if !bytes.Equal(header.Extra[extraVanity:extraSuffix], signers) {
 			return errMismatchingCheckpointSigners
@@ -475,14 +469,6 @@ func (c *E2C) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	if signer != snap.Signer {
 		return errUnauthorizedSigner
 	}
-	for seen, recent := range snap.Recents {
-		if recent == signer {
-			// Signer is among recents, only fail if the current block doesn't shift it out
-			if limit := uint64(1); seen > number-limit {
-				return errRecentlySigned
-			}
-		}
-	}
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	return nil
 }
@@ -500,27 +486,7 @@ func (c *E2C) Prepare(chain consensus.ChainHeaderReader, header *types.Header) e
 	if err != nil {
 		return err
 	}
-	if number%c.config.Epoch != 0 {
-		c.lock.RLock()
 
-		// Gather all the proposals that make sense voting on
-		addresses := make([]common.Address, 0, len(c.proposals))
-		for address, authorize := range c.proposals {
-			if snap.validVote(address, authorize) {
-				addresses = append(addresses, address)
-			}
-		}
-		// If there's pending proposals, cast a vote on them
-		if len(addresses) > 0 {
-			header.Coinbase = addresses[rand.Intn(len(addresses))]
-			if c.proposals[header.Coinbase] {
-				copy(header.Nonce[:], nonceAuthVote)
-			} else {
-				copy(header.Nonce[:], nonceDropVote)
-			}
-		}
-		c.lock.RUnlock()
-	}
 	// Set the correct difficulty
 	header.Difficulty = difficulty
 
@@ -531,9 +497,8 @@ func (c *E2C) Prepare(chain consensus.ChainHeaderReader, header *types.Header) e
 	header.Extra = header.Extra[:extraVanity]
 
 	if number%c.config.Epoch == 0 {
-		for _, signer := range snap.signers() {
-			header.Extra = append(header.Extra, signer[:]...)
-		}
+		signer := snap.signer()
+		header.Extra = append(header.Extra, signer[:]...)
 	}
 	header.Extra = append(header.Extra, make([]byte, extraSeal)...)
 
