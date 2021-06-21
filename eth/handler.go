@@ -1097,8 +1097,8 @@ func (pm *ProtocolManager) InsertBlock(block *types.Block) (int, error) {
 	return n, err
 }
 
-func (pm *ProtocolManager) VerifyHeader(header *types.Header) error {
-	return pm.engine.VerifyHeader(pm.blockchain, header, true)
+func (pm *ProtocolManager) ChainHeaderReader() consensus.ChainHeaderReader {
+	return pm.blockchain
 }
 
 func (pm *ProtocolManager) BroadcastMsg(msgCode uint64, data interface{}) {

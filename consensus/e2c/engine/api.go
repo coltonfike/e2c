@@ -14,11 +14,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package e2c
+package engine
 
 import (
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -189,7 +190,7 @@ func (api *API) Status(startBlockNum *rpc.BlockNumber, endBlockNum *rpc.BlockNum
 		if h == nil {
 			return nil, fmt.Errorf("missing block %d", n)
 		}
-		if h.Difficulty.Cmp(diffInTurn) == 0 {
+		if h.Difficulty.Cmp(big.NewInt(1)) == 0 {
 			optimals++
 		}
 		diff += h.Difficulty.Uint64()

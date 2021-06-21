@@ -6,11 +6,11 @@ import (
 )
 
 type BlockProposal struct {
-	id    string
-	block *types.Block
+	Id    string
+	Block *types.Block
 }
 
 type Ack struct {
-	id    string
-	block common.Hash
+	Id    string
+	Block common.Hash
 }

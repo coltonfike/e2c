@@ -5,7 +5,7 @@ import (
 )
 
 type ProgressTimer struct {
-	timer *time.Timer
+	Timer *time.Timer
 	end   time.Time
 }
 
@@ -14,12 +14,12 @@ func NewProgressTimer(t time.Duration) *ProgressTimer {
 }
 
 func (pt *ProgressTimer) Reset(t time.Duration) {
-	pt.timer.Reset(t)
+	pt.Timer.Reset(t)
 	pt.end = time.Now().Add(t)
 }
 
 func (pt *ProgressTimer) AddDuration(t time.Duration) {
 	d := time.Until(pt.end) + t
-	pt.timer.Reset(d)
+	pt.Timer.Reset(d)
 	pt.end = time.Now().Add(d)
 }

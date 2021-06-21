@@ -74,8 +74,8 @@ type Broadcaster interface {
 
 	BroadcastBlock(block *types.Block, propagate bool)
 	InsertBlock(block *types.Block) (int, error)
-	VerifyHeader(header *types.Header) error
 	BroadcastMsg(msgCode uint64, data interface{})
+	ChainHeaderReader() ChainHeaderReader
 }
 
 // Peer defines the interface to communicate with peer

@@ -152,6 +152,7 @@ type PoW interface {
 	Hashrate() float64
 }
 
+// TODO: This is how to exit. Implement this later for E2C
 // Istanbul is a consensus engine to avoid byzantine failure
 type Istanbul interface {
 	Engine

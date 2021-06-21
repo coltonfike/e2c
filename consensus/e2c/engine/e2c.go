@@ -15,7 +15,7 @@
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 // Package clique implements the proof-of-authority consensus engine.
-package e2c
+package engine
 
 import (
 	"bytes"
@@ -31,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/e2c/core"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -62,10 +63,8 @@ var (
 	nonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
 	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
 
-	uncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
-
-	diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
-	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
+	uncleHash  = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
+	difficulty = big.NewInt(1)
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -182,7 +181,7 @@ type E2C struct {
 	lock   sync.RWMutex   // Protects the signer fields
 
 	broadcaster consensus.Broadcaster // Protocol Manager
-	handler     *E2CHandler
+	core        *core.Core
 
 	eventMux *event.TypeMux
 	delta    int
@@ -215,8 +214,7 @@ func New(config *params.E2CConfig, db ethdb.Database) *E2C {
 		f:          2,
 	}
 
-	e2c.handler = NewE2CHandler(e2c)
-	e2c.handler.Start()
+	e2c.core = core.New(e2c, e2c.delta)
 	return e2c
 }
 
@@ -304,7 +302,7 @@ func (c *E2C) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	}
 	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
 	if number > 0 {
-		if header.Difficulty == nil || (header.Difficulty.Cmp(diffInTurn) != 0 && header.Difficulty.Cmp(diffNoTurn) != 0) {
+		if header.Difficulty == nil || header.Difficulty.Cmp(difficulty) != 0 {
 			return errInvalidDifficulty
 		}
 	}
@@ -486,15 +484,6 @@ func (c *E2C) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 		}
 	}
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
-	if !c.fakeDiff {
-		inturn := snap.inturn(header.Number.Uint64(), signer)
-		if inturn && header.Difficulty.Cmp(diffInTurn) != 0 {
-			return errWrongDifficulty
-		}
-		if !inturn && header.Difficulty.Cmp(diffNoTurn) != 0 {
-			return errWrongDifficulty
-		}
-	}
 	return nil
 }
 
@@ -533,7 +522,7 @@ func (c *E2C) Prepare(chain consensus.ChainHeaderReader, header *types.Header) e
 		c.lock.RUnlock()
 	}
 	// Set the correct difficulty
-	header.Difficulty = CalcDifficulty(snap, c.signer)
+	header.Difficulty = difficulty
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < extraVanity {
@@ -637,21 +626,7 @@ func (c *E2C) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 // that a new block should have based on the previous blocks in the chain and the
 // current signer.
 func (c *E2C) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
-	snap, err := c.snapshot(chain, parent.Number.Uint64(), parent.Hash(), nil)
-	if err != nil {
-		return nil
-	}
-	return CalcDifficulty(snap, c.signer)
-}
-
-// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
-// that a new block should have based on the previous blocks in the chain and the
-// current signer.
-func CalcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
-	if snap.inturn(snap.Number+1, signer) {
-		return new(big.Int).Set(diffInTurn)
-	}
-	return new(big.Int).Set(diffNoTurn)
+	return difficulty
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
@@ -661,7 +636,7 @@ func (c *E2C) SealHash(header *types.Header) common.Hash {
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *E2C) Close() error {
-	c.handler.Stop()
+	c.core.Stop()
 	return nil
 }
 
