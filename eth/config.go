@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/istanbul"
 	"github.com/ethereum/go-ethereum/core"
@@ -80,6 +81,7 @@ var DefaultConfig = Config{
 	RPCTxFeeCap: 1, // 1 ether
 
 	Istanbul: *istanbul.DefaultConfig, // Quorum
+	E2C:      *e2c.DefaultConfig,      // Quorum
 }
 
 func init() {
@@ -170,6 +172,7 @@ type Config struct {
 	EnableNodePermission bool
 	// Istanbul options
 	Istanbul istanbul.Config
+	E2C      e2c.Config
 
 	// Miscellaneous options
 	DocRoot string `toml:"-"`

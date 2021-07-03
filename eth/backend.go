@@ -30,6 +30,8 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique"
+	"github.com/ethereum/go-ethereum/consensus/e2c"
+	e2cBackend "github.com/ethereum/go-ethereum/consensus/e2c/backend"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/istanbul"
 	istanbulBackend "github.com/ethereum/go-ethereum/consensus/istanbul/backend"
@@ -176,7 +178,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 
 	// force to set the istanbul etherbase to node key address
-	if chainConfig.Istanbul != nil {
+	if chainConfig.Istanbul != nil || chainConfig.E2C != nil {
 		eth.etherbase = crypto.PubkeyToAddress(stack.GetNodeKey().PublicKey)
 	}
 	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
@@ -304,6 +306,16 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 		config.Istanbul.AllowedFutureBlockTime = config.Miner.AllowedFutureBlockTime //Quorum
 
 		return istanbulBackend.New(&config.Istanbul, stack.GetNodeKey(), db)
+	}
+	if chainConfig.E2C != nil {
+		if chainConfig.E2C.Epoch != 0 {
+			config.E2C.Epoch = chainConfig.E2C.Epoch
+		}
+		config.E2C.ProposerPolicy = e2c.ProposerPolicy(chainConfig.E2C.ProposerPolicy)
+		config.E2C.Ceil2Nby3Block = chainConfig.E2C.Ceil2Nby3Block
+		config.E2C.AllowedFutureBlockTime = config.Miner.AllowedFutureBlockTime //Quorum
+
+		return e2cBackend.New(&config.E2C, stack.GetNodeKey(), db)
 	}
 
 	// Otherwise assume proof-of-work

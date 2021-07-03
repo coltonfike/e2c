@@ -1043,6 +1043,8 @@ func (pm *ProtocolManager) getConsensusAlgorithm() string {
 		switch pm.engine.(type) {
 		case consensus.Istanbul:
 			consensusAlgo = "istanbul"
+		case consensus.E2C:
+			consensusAlgo = "e2c"
 		case *clique.Clique:
 			consensusAlgo = "clique"
 		case *ethash.Ethash:
