@@ -22,9 +22,8 @@ func Encode(vanity string, validators common.Address) (string, error) {
 	newVanity = newVanity[:atypes.E2CExtraVanity]
 
 	ist := &atypes.E2CExtra{
-		Leader:        validators,
-		Seal:          make([]byte, atypes.E2CExtraSeal),
-		CommittedSeal: [][]byte{},
+		Leader: validators,
+		Seal:   make([]byte, atypes.E2CExtraSeal),
 	}
 
 	payload, err := rlp.EncodeToBytes(&ist)

@@ -33,10 +33,9 @@ type API struct {
 
 // BlockSigners is contains who created and who signed a particular block, denoted by its number and hash
 type BlockSigners struct {
-	Number     uint64
-	Hash       common.Hash
-	Author     common.Address
-	Committers []common.Address
+	Number uint64
+	Hash   common.Hash
+	Author common.Address
 }
 
 type Status struct {
@@ -83,16 +82,10 @@ func (api *API) signers(header *types.Header) (*BlockSigners, error) {
 		return nil, err
 	}
 
-	committers, err := api.e2c.Signers(header)
-	if err != nil {
-		return nil, err
-	}
-
 	return &BlockSigners{
-		Number:     header.Number.Uint64(),
-		Hash:       header.Hash(),
-		Author:     author,
-		Committers: committers,
+		Number: header.Number.Uint64(),
+		Hash:   header.Hash(),
+		Author: author,
 	}, nil
 }
 

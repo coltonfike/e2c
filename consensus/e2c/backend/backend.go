@@ -172,11 +172,6 @@ func (sb *backend) Commit(proposal e2c.Proposal, seals [][]byte) error {
 	}
 
 	h := block.Header()
-	// Append seals into extra-data
-	err := writeCommittedSeals(h, seals)
-	if err != nil {
-		return err
-	}
 	// update block's header
 	block = block.WithSeal(h)
 

@@ -18,9 +18,11 @@ package types
 
 import (
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -29,17 +31,16 @@ var (
 	// to identify whether the block is from E2C consensus engine
 	E2CDigest = common.HexToHash("0x63746963616c2062797a616e74696e65206661756c7420746f6c6572616e6365")
 
-	E2CExtraVanity = 32 // Fixed number of extra-data bytes reserved for validator vanity
-	E2CExtraSeal   = 65 // Fixed number of extra-data bytes reserved for validator seal
+	E2CExtraVanity = 32                     // Fixed number of extra-data bytes reserved for validator vanity
+	E2CExtraSeal   = crypto.SignatureLength // Fixed number of extra-data bytes reserved for validator seal
 
 	// ErrInvalidE2CHeaderExtra is returned if the length of extra-data is less than 32 bytes
 	ErrInvalidE2CHeaderExtra = errors.New("invalid e2c header extra-data")
 )
 
 type E2CExtra struct {
-	Leader        common.Address
-	Seal          []byte
-	CommittedSeal [][]byte
+	Leader common.Address
+	Seal   []byte
 }
 
 // EncodeRLP serializes ist into the Ethereum RLP format.
@@ -47,21 +48,19 @@ func (ist *E2CExtra) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, []interface{}{
 		ist.Leader,
 		ist.Seal,
-		ist.CommittedSeal,
 	})
 }
 
 // DecodeRLP implements rlp.Decoder, and load the istanbul fields from a RLP stream.
 func (ist *E2CExtra) DecodeRLP(s *rlp.Stream) error {
 	var E2CExtra struct {
-		Leader        common.Address
-		Seal          []byte
-		CommittedSeal [][]byte
+		Leader common.Address
+		Seal   []byte
 	}
 	if err := s.Decode(&E2CExtra); err != nil {
 		return err
 	}
-	ist.Leader, ist.Seal, ist.CommittedSeal = E2CExtra.Leader, E2CExtra.Seal, E2CExtra.CommittedSeal
+	ist.Leader, ist.Seal = E2CExtra.Leader, E2CExtra.Seal
 	return nil
 }
 
@@ -76,6 +75,7 @@ func ExtractE2CExtra(h *Header) (*E2CExtra, error) {
 	var E2CExtra *E2CExtra
 	err := rlp.DecodeBytes(h.Extra[E2CExtraVanity:], &E2CExtra)
 	if err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 	return E2CExtra, nil
@@ -94,7 +94,6 @@ func E2CFilteredHeader(h *Header, keepSeal bool) *Header {
 	if !keepSeal {
 		E2CExtra.Seal = []byte{}
 	}
-	E2CExtra.CommittedSeal = [][]byte{}
 
 	payload, err := rlp.EncodeToBytes(&E2CExtra)
 	if err != nil {
