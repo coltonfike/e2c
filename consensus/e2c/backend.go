@@ -30,16 +30,16 @@ type Backend interface {
 	Address() common.Address
 
 	// Validators returns the validator set
-	Validators(proposal Proposal) ValidatorSet
+	Leader(proposal Proposal) common.Address
 
 	// EventMux returns the event mux in backend
 	EventMux() *event.TypeMux
 
 	// Broadcast sends a message to all validators (include self)
-	Broadcast(valSet ValidatorSet, payload []byte) error
+	Broadcast(addr common.Address, payload []byte) error
 
 	// Gossip sends a message to all validators (exclude self)
-	Gossip(valSet ValidatorSet, payload []byte) error
+	Gossip(addr common.Address, payload []byte) error
 
 	// Commit delivers an approved proposal to backend.
 	// The delivered proposal will be put into blockchain.
@@ -66,7 +66,7 @@ type Backend interface {
 	GetProposer(number uint64) common.Address
 
 	// ParentValidators returns the validator set of the given proposal's parent block
-	ParentValidators(proposal Proposal) ValidatorSet
+	ParentValidators(proposal Proposal) common.Address
 
 	// HasBadBlock returns whether the block with the hash is a bad block
 	HasBadProposal(hash common.Hash) bool

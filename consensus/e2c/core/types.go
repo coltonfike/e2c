@@ -143,7 +143,7 @@ func (m *message) FromPayload(b []byte, validateFn func([]byte, []byte) (common.
 			return err
 		}
 		if !bytes.Equal(signerAdd.Bytes(), m.Address.Bytes()) {
-			return errInvalidSigner
+			return err
 		}
 	}
 	return nil

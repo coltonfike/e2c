@@ -115,7 +115,7 @@ func (api *API) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 }
 
 // GetValidators retrieves the list of authorized validators at the specified block.
-func (api *API) GetValidators(number *rpc.BlockNumber) ([]common.Address, error) {
+func (api *API) GetValidators(number *rpc.BlockNumber) (common.Address, error) {
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if number == nil || *number == rpc.LatestBlockNumber {
@@ -125,26 +125,26 @@ func (api *API) GetValidators(number *rpc.BlockNumber) ([]common.Address, error)
 	}
 	// Ensure we have an actually valid block and return the validators from its snapshot
 	if header == nil {
-		return nil, errUnknownBlock
+		return common.Address{}, errUnknownBlock
 	}
 	snap, err := api.e2c.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
-		return nil, err
+		return common.Address{}, err
 	}
-	return snap.validators(), nil
+	return snap.Leader, nil
 }
 
 // GetValidatorsAtHash retrieves the state snapshot at a given block.
-func (api *API) GetValidatorsAtHash(hash common.Hash) ([]common.Address, error) {
+func (api *API) GetValidatorsAtHash(hash common.Hash) (common.Address, error) {
 	header := api.chain.GetHeaderByHash(hash)
 	if header == nil {
-		return nil, errUnknownBlock
+		return common.Address{}, errUnknownBlock
 	}
 	snap, err := api.e2c.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
-		return nil, err
+		return common.Address{}, err
 	}
-	return snap.validators(), nil
+	return snap.Leader, nil
 }
 
 // Candidates returns the current candidates the node tries to uphold and vote on.
@@ -230,9 +230,7 @@ func (api *API) Status(startBlockNum *rpc.BlockNumber, endBlockNum *rpc.BlockNum
 		}
 	}
 	signStatus := make(map[common.Address]int)
-	for _, s := range signers {
-		signStatus[s] = 0
-	}
+	signStatus[signers] = 0
 
 	for n := start; n < end; n++ {
 		blockNum := rpc.BlockNumber(int64(n))
@@ -256,10 +254,8 @@ func (api *API) IsValidator(blockNum *rpc.BlockNumber) (bool, error) {
 	}
 	s, _ := api.GetValidators(&blockNumber)
 
-	for _, v := range s {
-		if v == api.e2c.address {
-			return true, nil
-		}
+	if s == api.e2c.address {
+		return true, nil
 	}
 	return false, nil
 }

@@ -26,7 +26,6 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
 	e2cCore "github.com/ethereum/go-ethereum/consensus/e2c/core"
-	"github.com/ethereum/go-ethereum/consensus/e2c/validator"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -112,12 +111,12 @@ func (sb *backend) Address() common.Address {
 }
 
 // Validators implements e2c.Backend.Validators
-func (sb *backend) Validators(proposal e2c.Proposal) e2c.ValidatorSet {
-	return sb.getValidators(proposal.Number().Uint64(), proposal.Hash())
+func (sb *backend) Leader(proposal e2c.Proposal) common.Address {
+	return sb.getLeader(proposal.Number().Uint64(), proposal.Hash())
 }
 
 // Broadcast implements e2c.Backend.Broadcast
-func (sb *backend) Broadcast(valSet e2c.ValidatorSet, payload []byte) error {
+func (sb *backend) Broadcast(valSet common.Address, payload []byte) error {
 	// send to others
 	sb.Gossip(valSet, payload)
 	// send to self
@@ -129,16 +128,12 @@ func (sb *backend) Broadcast(valSet e2c.ValidatorSet, payload []byte) error {
 }
 
 // Broadcast implements e2c.Backend.Gossip
-func (sb *backend) Gossip(valSet e2c.ValidatorSet, payload []byte) error {
+func (sb *backend) Gossip(valSet common.Address, payload []byte) error {
 	hash := e2c.RLPHash(payload)
 	sb.knownMessages.Add(hash, true)
 
 	targets := make(map[common.Address]bool)
-	for _, val := range valSet.List() {
-		if val.Address() != sb.Address() {
-			targets[val.Address()] = true
-		}
-	}
+	targets[valSet] = true
 	if sb.broadcaster != nil && len(targets) > 0 {
 		ps := sb.broadcaster.FindPeers(targets)
 		for addr, p := range ps {
@@ -269,19 +264,19 @@ func (sb *backend) GetProposer(number uint64) common.Address {
 }
 
 // ParentValidators implements e2c.Backend.GetParentValidators
-func (sb *backend) ParentValidators(proposal e2c.Proposal) e2c.ValidatorSet {
+func (sb *backend) ParentValidators(proposal e2c.Proposal) common.Address {
 	if block, ok := proposal.(*types.Block); ok {
-		return sb.getValidators(block.Number().Uint64()-1, block.ParentHash())
+		return sb.getLeader(block.Number().Uint64()-1, block.ParentHash())
 	}
-	return validator.NewSet(nil, sb.config.ProposerPolicy)
+	return common.Address{}
 }
 
-func (sb *backend) getValidators(number uint64, hash common.Hash) e2c.ValidatorSet {
+func (sb *backend) getLeader(number uint64, hash common.Hash) common.Address {
 	snap, err := sb.snapshot(sb.chain, number, hash, nil)
 	if err != nil {
-		return validator.NewSet(nil, sb.config.ProposerPolicy)
+		return common.Address{}
 	}
-	return snap.ValSet
+	return snap.Leader
 }
 
 func (sb *backend) LastProposal() (e2c.Proposal, common.Address) {

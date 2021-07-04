@@ -19,6 +19,7 @@ package backend
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 	"math/rand"
 	"time"
@@ -27,7 +28,6 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
-	"github.com/ethereum/go-ethereum/consensus/e2c/validator"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -176,10 +176,8 @@ func (sb *backend) verifyCascadingFields(chain consensus.ChainHeaderReader, head
 	if err != nil {
 		return err
 	}
-	validators := make([]byte, len(snap.validators())*common.AddressLength)
-	for i, validator := range snap.validators() {
-		copy(validators[i*common.AddressLength:], validator[:])
-	}
+	validators := make([]byte, common.AddressLength)
+	copy(validators[:], snap.Leader[:])
 	if err := sb.verifySigner(chain, header, parents); err != nil {
 		return err
 	}
@@ -248,7 +246,7 @@ func (sb *backend) verifySigner(chain consensus.ChainHeaderReader, header *types
 	}
 
 	// Signer should be in the validator set of previous block's extraData.
-	if _, v := snap.ValSet.GetByAddress(signer); v == nil {
+	if signer != snap.Leader {
 		return errUnauthorized
 	}
 	return nil
@@ -297,12 +295,6 @@ func (sb *backend) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 	sb.candidatesLock.RLock()
 	var addresses []common.Address
 	var authorizes []bool
-	for address, authorize := range sb.candidates {
-		if snap.checkVote(address, authorize) {
-			addresses = append(addresses, address)
-			authorizes = append(authorizes, authorize)
-		}
-	}
 	sb.candidatesLock.RUnlock()
 
 	// pick one of the candidates randomly
@@ -318,7 +310,7 @@ func (sb *backend) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 	}
 
 	// add validators in snapshot to extraData's validators section
-	extra, err := prepareExtra(header, snap.validators())
+	extra, err := prepareExtra(header, snap.Leader)
 	if err != nil {
 		return err
 	}
@@ -367,7 +359,7 @@ func (sb *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, r
 	if err != nil {
 		return err
 	}
-	if _, v := snap.ValSet.GetByAddress(sb.address); v == nil {
+	if snap.Leader != sb.address {
 		return errUnauthorized
 	}
 
@@ -386,37 +378,14 @@ func (sb *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, r
 		// wait for the timestamp of header, use this to adjust the block period
 		select {
 		case <-time.After(delay):
+			results <- block
+			fmt.Println("\n\n\n\nBlock", number, "sealed\n\n\n")
+			return
 		case <-stop:
 			results <- nil
 			return
 		}
-
 		// get the proposed block hash and clear it if the seal() is completed.
-		sb.sealMu.Lock()
-		sb.proposedBlockHash = block.Hash()
-
-		defer func() {
-			sb.proposedBlockHash = common.Hash{}
-			sb.sealMu.Unlock()
-		}()
-		// post block into Istanbul engine
-		go sb.EventMux().Post(e2c.RequestEvent{
-			Proposal: block,
-		})
-		for {
-			select {
-			case result := <-sb.commitCh:
-				// if the block hash and the hash from channel are the same,
-				// return the result. Otherwise, keep waiting the next hash.
-				if result != nil && block.Hash() == result.Hash() {
-					results <- result
-					return
-				}
-			case <-stop:
-				results <- nil
-				return
-			}
-		}
 	}()
 	return nil
 }
@@ -520,7 +489,7 @@ func (sb *backend) snapshot(chain consensus.ChainHeaderReader, number uint64, ha
 			if err != nil {
 				return nil, err
 			}
-			snap = newSnapshot(sb.config.Epoch, 0, genesis.Hash(), validator.NewSet([]common.Address{e2cExtra.Leader}, sb.config.ProposerPolicy))
+			snap = newSnapshot(sb.config.Epoch, 0, genesis.Hash(), e2cExtra.Leader)
 			if err := snap.store(sb.db); err != nil {
 				return nil, err
 			}
@@ -610,7 +579,7 @@ func ecrecover(header *types.Header) (common.Address, error) {
 }
 
 // prepareExtra returns a extra-data of the given header and validators
-func prepareExtra(header *types.Header, vals []common.Address) ([]byte, error) {
+func prepareExtra(header *types.Header, vals common.Address) ([]byte, error) {
 	var buf bytes.Buffer
 
 	// compensate the lack bytes if header.Extra is not enough IstanbulExtraVanity bytes.
@@ -620,7 +589,7 @@ func prepareExtra(header *types.Header, vals []common.Address) ([]byte, error) {
 	buf.Write(header.Extra[:types.E2CExtraVanity])
 
 	ist := &types.E2CExtra{
-		Leader: vals[0],
+		Leader: vals,
 		Seal:   []byte{},
 	}
 
