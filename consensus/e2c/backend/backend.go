@@ -18,21 +18,19 @@ package backend
 
 import (
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
 	e2cCore "github.com/ethereum/go-ethereum/consensus/e2c/core"
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/trie"
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -49,14 +47,12 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 	knownMessages, _ := lru.NewARC(inmemoryMessages)
 	backend := &backend{
 		config:         config,
-		e2cEventMux:    new(event.TypeMux),
+		eventMux:       new(event.TypeMux),
 		privateKey:     privateKey,
 		address:        crypto.PubkeyToAddress(privateKey.PublicKey),
 		logger:         log.New(),
 		db:             db,
-		commitCh:       make(chan *types.Block, 1),
 		recents:        recents,
-		candidates:     make(map[common.Address]bool),
 		coreStarted:    false,
 		recentMessages: recentMessages,
 		knownMessages:  knownMessages,
@@ -68,28 +64,18 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 // ----------------------------------------------------------------------------
 
 type backend struct {
-	config       *e2c.Config
-	e2cEventMux  *event.TypeMux
-	privateKey   *ecdsa.PrivateKey
-	address      common.Address
-	core         e2cCore.Engine
-	logger       log.Logger
-	db           ethdb.Database
-	chain        consensus.ChainHeaderReader
-	currentBlock func() *types.Block
-	hasBadBlock  func(hash common.Hash) bool
+	config      *e2c.Config
+	eventMux    *event.TypeMux
+	privateKey  *ecdsa.PrivateKey
+	address     common.Address
+	core        e2c.Engine
+	logger      log.Logger
+	db          ethdb.Database
+	chain       consensus.ChainHeaderReader
+	sealMu      sync.Mutex
+	coreStarted bool
+	coreMu      sync.RWMutex
 
-	// the channels for e2c engine notifications
-	commitCh          chan *types.Block
-	proposedBlockHash common.Hash
-	sealMu            sync.Mutex
-	coreStarted       bool
-	coreMu            sync.RWMutex
-
-	// Current list of candidates we are pushing
-	candidates map[common.Address]bool
-	// Protects the signer fields
-	candidatesLock sync.RWMutex
 	// Snapshots for recent block to speed up reorgs
 	recents *lru.ARCCache
 
@@ -100,44 +86,34 @@ type backend struct {
 	knownMessages  *lru.ARCCache // the cache of self messages
 }
 
-// zekun: HACK
-func (sb *backend) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
+func (b *backend) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
 	return new(big.Int)
 }
 
 // Address implements e2c.Backend.Address
-func (sb *backend) Address() common.Address {
-	return sb.address
+func (b *backend) Address() common.Address {
+	return b.address
 }
 
 // Validators implements e2c.Backend.Validators
-func (sb *backend) Leader(proposal e2c.Proposal) common.Address {
-	return sb.getLeader(proposal.Number().Uint64(), proposal.Hash())
-}
-
-// Broadcast implements e2c.Backend.Broadcast
-func (sb *backend) Broadcast(valSet common.Address, payload []byte) error {
-	// send to others
-	sb.Gossip(valSet, payload)
-	// send to self
-	msg := e2c.MessageEvent{
-		Payload: payload,
+func (b *backend) Leader(block *types.Block) common.Address {
+	snap, err := b.snapshot(b.chain, block.Number().Uint64(), block.Hash(), nil)
+	if err != nil {
+		return common.Address{}
 	}
-	go sb.e2cEventMux.Post(msg)
-	return nil
+	return snap.Leader
 }
 
 // Broadcast implements e2c.Backend.Gossip
-func (sb *backend) Gossip(valSet common.Address, payload []byte) error {
+func (b *backend) Broadcast(payload []byte) error {
 	hash := e2c.RLPHash(payload)
-	sb.knownMessages.Add(hash, true)
+	b.knownMessages.Add(hash, true)
 
-	targets := make(map[common.Address]bool)
-	targets[valSet] = true
-	if sb.broadcaster != nil && len(targets) > 0 {
-		ps := sb.broadcaster.FindPeers(targets)
+	if b.broadcaster != nil {
+		ps := b.broadcaster.PeerSet()
+		fmt.Println("PeerSet:", len(ps))
 		for addr, p := range ps {
-			ms, ok := sb.recentMessages.Get(addr)
+			ms, ok := b.recentMessages.Get(addr)
 			var m *lru.ARCCache
 			if ok {
 				m, _ = ms.(*lru.ARCCache)
@@ -150,159 +126,93 @@ func (sb *backend) Gossip(valSet common.Address, payload []byte) error {
 			}
 
 			m.Add(hash, true)
-			sb.recentMessages.Add(addr, m)
+			b.recentMessages.Add(addr, m)
 			go p.SendConsensus(e2cMsg, payload)
 		}
 	}
 	return nil
 }
 
+func (b *backend) SendNewBlock(block *types.Block) error {
+
+	msg, err := Encode(&e2c.NewBlockEvent{Block: block})
+	if err != nil {
+		return err
+	}
+	m := &message{
+		Code:    newBlockMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+	payload, err := m.PayloadWithSig(b.Sign)
+	if err != nil {
+		return err
+	}
+	go b.Broadcast(payload)
+	return nil
+}
+
+func (b *backend) RelayBlock(header *types.Header) error {
+
+	msg, err := Encode(&e2c.RelayBlockEvent{Header: header})
+	if err != nil {
+		return err
+	}
+	m := &message{
+		Code:    relayMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+
+	payload, err := m.PayloadWithSig(b.Sign)
+	if err != nil {
+		return err
+	}
+	go b.Broadcast(payload)
+	return nil
+}
+
+func (b *backend) SendBlame(addr common.Address) error {
+
+	msg, err := Encode(&e2c.BlameEvent{Address: addr})
+	if err != nil {
+		return err
+	}
+	m := &message{
+		Code:    blameMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+	payload, err := m.PayloadWithSig(b.Sign)
+	if err != nil {
+		return err
+	}
+	go b.Broadcast(payload)
+	return nil
+}
+
 // Commit implements e2c.Backend.Commit
-func (sb *backend) Commit(proposal e2c.Proposal, seals [][]byte) error {
-	// Check if the proposal is a valid block
-	block, ok := proposal.(*types.Block)
-	if !ok {
-		sb.logger.Error("Invalid proposal, %v", proposal)
-		return errInvalidProposal
-	}
-
-	h := block.Header()
-	// update block's header
-	block = block.WithSeal(h)
-
-	sb.logger.Info("Committed", "address", sb.Address(), "hash", proposal.Hash(), "number", proposal.Number().Uint64())
-	// - if the proposed and committed blocks are the same, send the proposed hash
-	//   to commit channel, which is being watched inside the engine.Seal() function.
-	// - otherwise, we try to insert the block.
-	// -- if success, the ChainHeadEvent event will be broadcasted, try to build
-	//    the next block and the previous Seal() will be stopped.
-	// -- otherwise, a error will be returned and a round change event will be fired.
-	if sb.proposedBlockHash == block.Hash() {
-		// feed block hash to Seal() and wait the Seal() result
-		sb.commitCh <- block
-		return nil
-	}
-
-	if sb.broadcaster != nil {
-		sb.broadcaster.Enqueue(fetcherID, block)
-	}
+func (b *backend) Commit(block *types.Block) error {
+	b.broadcaster.Enqueue(fetcherID, block)
 	return nil
 }
 
 // EventMux implements e2c.Backend.EventMux
-func (sb *backend) EventMux() *event.TypeMux {
-	return sb.e2cEventMux
+func (b *backend) EventMux() *event.TypeMux {
+	return b.eventMux
 }
 
 // Verify implements e2c.Backend.Verify
-func (sb *backend) Verify(proposal e2c.Proposal) (time.Duration, error) {
-	// Check if the proposal is a valid block
-	block, ok := proposal.(*types.Block)
-	if !ok {
-		sb.logger.Error("Invalid proposal, %v", proposal)
-		return 0, errInvalidProposal
-	}
-
-	// check bad block
-	if sb.HasBadProposal(block.Hash()) {
-		return 0, core.ErrBlacklistedHash
-	}
-
-	// check block body
-	txnHash := types.DeriveSha(block.Transactions(), new(trie.Trie))
-	uncleHash := types.CalcUncleHash(block.Uncles())
-	if txnHash != block.Header().TxHash {
-		return 0, errMismatchTxhashes
-	}
-	if uncleHash != nilUncleHash {
-		return 0, errInvalidUncleHash
-	}
-
-	// verify the header of proposed block
-	err := sb.VerifyHeader(sb.chain, block.Header(), false)
-	// ignore errEmptyCommittedSeals error because we don't have the committed seals yet
-	if err == nil || err == errEmptyCommittedSeals {
-		return 0, nil
-	} else if err == consensus.ErrFutureBlock {
-		return time.Unix(int64(block.Header().Time), 0).Sub(now()), consensus.ErrFutureBlock
-	}
-	return 0, err
-}
-
-// Sign implements e2c.Backend.Sign
-func (sb *backend) Sign(data []byte) ([]byte, error) {
-	hashData := crypto.Keccak256(data)
-	return crypto.Sign(hashData, sb.privateKey)
-}
-
-// CheckSignature implements e2c.Backend.CheckSignature
-func (sb *backend) CheckSignature(data []byte, address common.Address, sig []byte) error {
-	signer, err := e2c.GetSignatureAddress(data, sig)
-	if err != nil {
-		log.Error("Failed to get signer address", "err", err)
-		return err
-	}
-	// Compare derived addresses
-	if signer != address {
-		return errInvalidSignature
-	}
+func (b *backend) Verify(block *types.Block) error {
 	return nil
 }
 
-// HasPropsal implements e2c.Backend.HashBlock
-func (sb *backend) HasPropsal(hash common.Hash, number *big.Int) bool {
-	return sb.chain.GetHeader(hash, number.Uint64()) != nil
+// Sign implements e2c.Backend.Sign
+func (b *backend) Sign(data []byte) ([]byte, error) {
+	hashData := crypto.Keccak256(data)
+	return crypto.Sign(hashData, b.privateKey)
 }
 
-// GetProposer implements e2c.Backend.GetProposer
-func (sb *backend) GetProposer(number uint64) common.Address {
-	if h := sb.chain.GetHeaderByNumber(number); h != nil {
-		a, _ := sb.Author(h)
-		return a
-	}
-	return common.Address{}
-}
-
-// ParentValidators implements e2c.Backend.GetParentValidators
-func (sb *backend) ParentValidators(proposal e2c.Proposal) common.Address {
-	if block, ok := proposal.(*types.Block); ok {
-		return sb.getLeader(block.Number().Uint64()-1, block.ParentHash())
-	}
-	return common.Address{}
-}
-
-func (sb *backend) getLeader(number uint64, hash common.Hash) common.Address {
-	snap, err := sb.snapshot(sb.chain, number, hash, nil)
-	if err != nil {
-		return common.Address{}
-	}
-	return snap.Leader
-}
-
-func (sb *backend) LastProposal() (e2c.Proposal, common.Address) {
-	block := sb.currentBlock()
-
-	var proposer common.Address
-	if block.Number().Cmp(common.Big0) > 0 {
-		var err error
-		proposer, err = sb.Author(block.Header())
-		if err != nil {
-			sb.logger.Error("Failed to get block proposer", "err", err)
-			return nil, common.Address{}
-		}
-	}
-
-	// Return header only block here since we don't need block body
-	return block, proposer
-}
-
-func (sb *backend) HasBadProposal(hash common.Hash) bool {
-	if sb.hasBadBlock == nil {
-		return false
-	}
-	return sb.hasBadBlock(hash)
-}
-
-func (sb *backend) Close() error {
+func (b *backend) Close() error {
 	return nil
 }

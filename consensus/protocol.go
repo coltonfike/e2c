@@ -73,6 +73,9 @@ type Broadcaster interface {
 	Enqueue(id string, block *types.Block)
 	// FindPeers retrives peers by addresses
 	FindPeers(map[common.Address]bool) map[common.Address]Peer
+	// PeerSet gets all the peers of the node
+	// Needed in E2C
+	PeerSet() map[common.Address]Peer
 }
 
 // Peer defines the interface to communicate with peer

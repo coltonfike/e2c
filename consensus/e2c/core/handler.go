@@ -16,22 +16,88 @@
 
 package core
 
-// Start implements core.Engine.Start
-func (c *core) Start() error {
-	// Start a new round from last sequence + 1
+import (
+	"fmt"
+	"math/big"
+	"time"
 
-	// Tests will handle events itself, so we have to make subscribeEvents()
-	// be able to call in test.
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/e2c"
+	"github.com/ethereum/go-ethereum/core/types"
+)
 
-	return nil
+func (c *core) loop() {
+	defer func() {
+		c.handlerWg.Done()
+	}()
+
+	c.handlerWg.Add(1)
+
+	for {
+		select {
+		case event, ok := <-c.eventMux.Chan():
+			if !ok {
+				return
+			}
+
+			switch ev := event.Data.(type) {
+			case e2c.NewBlockEvent:
+				if err := c.handleBlock(ev.Block); err != nil {
+					fmt.Println("Problem handling block:", err)
+				}
+			}
+
+		case <-c.commitTimer.C:
+			// No blocks to work on
+			if len(c.queuedBlocks) == 0 {
+				c.commitTimer.Reset(time.Millisecond)
+				continue
+			}
+
+			if err := c.handleCommit(c.nextBlock); err != nil {
+				fmt.Println("Problem handling commit:", err)
+			}
+			if err := c.resetTimer(); err != nil {
+				fmt.Println("Problem handling timer:", err)
+			}
+
+		case <-c.progressTimer.Chan():
+			fmt.Println("Progress Timer expired! Sending Blame message!")
+		}
+	}
 }
 
-// Stop implements core.Engine.Stop
-func (c *core) Stop() error {
+func (c *core) handleCommit(block common.Hash) error {
 
-	// Make sure the handler goroutine exits
-	c.handlerWg.Wait()
-	return nil
+	err := c.backend.Commit(c.queuedBlocks[block].block)
+	if err == nil {
+		fmt.Println("Successfully committed block", c.queuedBlocks[block].block.Number().String())
+	}
+	c.delete(block)
+	return err
 }
 
-// ----------------------------------------------------------------------------
+func (c *core) handleBlock(block *types.Block) error {
+
+	c.verify(block) // TODO: Handle potential errors from this
+
+	fmt.Println("Valid block", block.Number().String(), "received!")
+	c.progressTimer.AddDuration(2 * c.delta * time.Millisecond)
+	c.backend.RelayBlock(block.Header())
+
+	if len(c.queuedBlocks) == 0 {
+		c.commitTimer.Reset(2 * c.delta * time.Millisecond)
+		c.nextBlock = block.Hash()
+	}
+
+	c.queuedBlocks[block.Hash()] = struct {
+		block *types.Block
+		time  time.Time
+	}{
+		block: block,
+		time:  time.Now(),
+	}
+
+	c.expectedHeight.Add(c.expectedHeight, big.NewInt(1))
+	return nil
+}

@@ -134,8 +134,8 @@ func (api *API) GetValidators(number *rpc.BlockNumber) (common.Address, error) {
 	return snap.Leader, nil
 }
 
-// GetValidatorsAtHash retrieves the state snapshot at a given block.
-func (api *API) GetValidatorsAtHash(hash common.Hash) (common.Address, error) {
+// GetLeaderAtHash retrieves the state snapshot at a given block.
+func (api *API) GetLeaderAtHash(hash common.Hash) (common.Address, error) {
 	header := api.chain.GetHeaderByHash(hash)
 	if header == nil {
 		return common.Address{}, errUnknownBlock
@@ -145,36 +145,6 @@ func (api *API) GetValidatorsAtHash(hash common.Hash) (common.Address, error) {
 		return common.Address{}, err
 	}
 	return snap.Leader, nil
-}
-
-// Candidates returns the current candidates the node tries to uphold and vote on.
-func (api *API) Candidates() map[common.Address]bool {
-	api.e2c.candidatesLock.RLock()
-	defer api.e2c.candidatesLock.RUnlock()
-
-	proposals := make(map[common.Address]bool)
-	for address, auth := range api.e2c.candidates {
-		proposals[address] = auth
-	}
-	return proposals
-}
-
-// Propose injects a new authorization candidate that the validator will attempt to
-// push through.
-func (api *API) Propose(address common.Address, auth bool) {
-	api.e2c.candidatesLock.Lock()
-	defer api.e2c.candidatesLock.Unlock()
-
-	api.e2c.candidates[address] = auth
-}
-
-// Discard drops a currently running candidate, stopping the validator from casting
-// further votes (either for or against).
-func (api *API) Discard(address common.Address) {
-	api.e2c.candidatesLock.Lock()
-	defer api.e2c.candidatesLock.Unlock()
-
-	delete(api.e2c.candidates, address)
 }
 
 func (api *API) Status(startBlockNum *rpc.BlockNumber, endBlockNum *rpc.BlockNumber) (*Status, error) {

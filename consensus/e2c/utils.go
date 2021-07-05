@@ -17,12 +17,37 @@
 package e2c
 
 import (
+	"time"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"golang.org/x/crypto/sha3"
 )
+
+type ProgressTimer struct {
+	timer *time.Timer
+	end   time.Time
+}
+
+func NewProgressTimer(t time.Duration) *ProgressTimer {
+	return &ProgressTimer{time.NewTimer(t), time.Now().Add(t)}
+}
+
+func (pt *ProgressTimer) Reset(t time.Duration) {
+	pt.timer.Reset(t)
+	pt.end = time.Now().Add(t)
+}
+
+func (pt *ProgressTimer) AddDuration(t time.Duration) {
+	d := time.Until(pt.end) + t
+	pt.timer.Reset(d)
+	pt.end = time.Now().Add(d)
+}
+
+func (pt *ProgressTimer) Chan() <-chan time.Time {
+	return pt.timer.C
+}
 
 func RLPHash(v interface{}) (h common.Hash) {
 	hw := sha3.NewLegacyKeccak256()
@@ -41,20 +66,4 @@ func GetSignatureAddress(data []byte, sig []byte) (common.Address, error) {
 		return common.Address{}, err
 	}
 	return crypto.PubkeyToAddress(*pubkey), nil
-}
-
-func CheckValidatorSignature(valSet ValidatorSet, data []byte, sig []byte) (common.Address, error) {
-	// 1. Get signature address
-	signer, err := GetSignatureAddress(data, sig)
-	if err != nil {
-		log.Error("Failed to get signer address", "err", err)
-		return common.Address{}, err
-	}
-
-	// 2. Check validator
-	if _, val := valSet.GetByAddress(signer); val != nil {
-		return val.Address(), nil
-	}
-
-	return common.Address{}, ErrUnauthorizedAddress
 }
