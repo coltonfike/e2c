@@ -28,8 +28,9 @@ import (
 )
 
 const (
-	e2cMsg      = 0x11
-	NewBlockMsg = 0x07
+	e2cMsg            = 0x11
+	NewBlockMsg       = 0x07
+	NewBlockHashesMsg = 0x01
 )
 
 var (
@@ -88,6 +89,7 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 
 		switch msg.Code {
 		case newBlockMsgCode:
+			// @todo if block didn't come from leader, reject
 			var e e2c.NewBlockEvent
 			if err := msg.Decode(&e); err != nil {
 				fmt.Println(err)
@@ -111,8 +113,13 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		}
 		return true, nil
 	}
+	//@todo, both of these lower ones need to be adjusted so that we only reject ones that we handle
 	// We commit our own blocks, and thus, don't want this to run on the protocol manager
 	if msg.Code == NewBlockMsg {
+		return true, nil
+	}
+	// Likewise, we reject block header announcements sent by fetcher
+	if msg.Code == NewBlockHashesMsg {
 		return true, nil
 	}
 	return false, nil
