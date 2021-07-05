@@ -18,7 +18,7 @@ package backend
 
 import (
 	"crypto/ecdsa"
-	"fmt"
+	"errors"
 	"math/big"
 	"sync"
 
@@ -31,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/trie"
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -40,7 +41,7 @@ const (
 )
 
 // New creates an Ethereum backend for Istanbul core engine.
-func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) consensus.Istanbul {
+func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) consensus.E2C {
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC(inmemorySnapshots)
 	recentMessages, _ := lru.NewARC(inmemoryPeers)
@@ -68,6 +69,7 @@ type backend struct {
 	eventMux    *event.TypeMux
 	privateKey  *ecdsa.PrivateKey
 	address     common.Address
+	leader      common.Address
 	core        e2c.Engine
 	logger      log.Logger
 	db          ethdb.Database
@@ -96,12 +98,8 @@ func (b *backend) Address() common.Address {
 }
 
 // Validators implements e2c.Backend.Validators
-func (b *backend) Leader(block *types.Block) common.Address {
-	snap, err := b.snapshot(b.chain, block.Number().Uint64(), block.Hash(), nil)
-	if err != nil {
-		return common.Address{}
-	}
-	return snap.Leader
+func (b *backend) Leader() common.Address {
+	return b.leader
 }
 
 // Broadcast implements e2c.Backend.Gossip
@@ -111,7 +109,6 @@ func (b *backend) Broadcast(payload []byte) error {
 
 	if b.broadcaster != nil {
 		ps := b.broadcaster.PeerSet()
-		fmt.Println("PeerSet:", len(ps))
 		for addr, p := range ps {
 			ms, ok := b.recentMessages.Get(addr)
 			var m *lru.ARCCache
@@ -202,17 +199,28 @@ func (b *backend) EventMux() *event.TypeMux {
 	return b.eventMux
 }
 
-// Verify implements e2c.Backend.Verify
-func (b *backend) Verify(block *types.Block) error {
-	return nil
-}
-
 // Sign implements e2c.Backend.Sign
 func (b *backend) Sign(data []byte) ([]byte, error) {
 	hashData := crypto.Keccak256(data)
 	return crypto.Sign(hashData, b.privateKey)
 }
 
+// Verify implements e2c.Backend.Verify
+func (b *backend) Verify(block *types.Block) error {
+
+	// Check block body with basic checks
+	if hash := types.DeriveSha(block.Transactions(), new(trie.Trie)); hash != block.TxHash() {
+		return errors.New("block has invalid body")
+		// @todo add this as an error
+		//return errInvalidBlockBody
+	}
+	if err := block.SanityCheck(); err != nil {
+		return err
+	}
+	return b.VerifyHeader(b.chain, block.Header(), false)
+}
+
+// Implements consensus.Engine.Close()
 func (b *backend) Close() error {
 	return nil
 }

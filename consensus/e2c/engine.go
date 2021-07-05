@@ -28,7 +28,7 @@ type Backend interface {
 	Address() common.Address
 
 	// Returns the current Leader
-	Leader(*types.Block) common.Address
+	Leader() common.Address
 
 	// EventMux returns the event mux in backend
 	EventMux() *event.TypeMux
@@ -59,4 +59,5 @@ type Backend interface {
 type Engine interface {
 	Start() error
 	Stop() error
+	GetQueuedBlock(common.Hash) (*types.Header, error)
 }

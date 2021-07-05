@@ -159,18 +159,17 @@ func (b *backend) verifyCascadingFields(chain consensus.ChainHeaderReader, heade
 		parent = chain.GetHeader(header.ParentHash, number-1)
 	}
 	if parent == nil || parent.Number.Uint64() != number-1 || parent.Hash() != header.ParentHash {
-		return consensus.ErrUnknownAncestor
+
+		// We probably have the block, but it's queued for commit, so ask the core if we have it first
+		var err error
+		parent, err = b.core.GetQueuedBlock(header.ParentHash)
+		if err != nil {
+			return consensus.ErrUnknownAncestor
+		}
 	}
 	if parent.Time+b.config.BlockPeriod > header.Time {
 		return errInvalidTimestamp
 	}
-	// Verify validators in extraData. Validators in snapshot and extraData should be the same.
-	snap, err := b.snapshot(chain, number-1, header.ParentHash, parents)
-	if err != nil {
-		return err
-	}
-	validators := make([]byte, common.AddressLength)
-	copy(validators[:], snap.Leader[:])
 	if err := b.verifySigner(chain, header, parents); err != nil {
 		return err
 	}
@@ -218,18 +217,12 @@ func (b *backend) VerifyUncles(chain consensus.ChainReader, block *types.Block) 
 	return nil
 }
 
-// verifySigner checks whether the signer is in parent's validator set
+// verifySigner checks whether the signer is the leader
 func (b *backend) verifySigner(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
 	// Verifying the genesis block is not supported
 	number := header.Number.Uint64()
 	if number == 0 {
 		return errUnknownBlock
-	}
-
-	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := b.snapshot(chain, number-1, header.ParentHash, parents)
-	if err != nil {
-		return err
 	}
 
 	// resolve the authorization key and check against signers
@@ -239,7 +232,7 @@ func (b *backend) verifySigner(chain consensus.ChainHeaderReader, header *types.
 	}
 
 	// Signer should be in the validator set of previous block's extraData.
-	if signer != snap.Leader {
+	if signer != b.leader {
 		return errUnauthorized
 	}
 	return nil
@@ -324,11 +317,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	header := block.Header()
 	number := header.Number.Uint64()
 	// Bail out if we're unauthorized to sign a block
-	snap, err := b.snapshot(chain, number-1, header.ParentHash, nil)
-	if err != nil {
-		return err
-	}
-	if snap.Leader != b.address {
+	if b.leader != b.address {
 		return errUnauthorized
 	}
 
@@ -336,7 +325,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
-	block, err = b.updateBlock(parent, block)
+	block, err := b.updateBlock(parent, block)
 	if err != nil {
 		return err
 	}
@@ -355,7 +344,6 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		case <-stop:
 			return
 		}
-		// get the proposed block hash and clear it if the seal() is completed.
 	}()
 	return nil
 }
@@ -388,34 +376,36 @@ func (b *backend) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 }
 
 // Start implements consensus.Istanbul.Start
-func (b *backend) Start(chain consensus.ChainHeaderReader, currentBlock func() *types.Block, hasBadBlock func(hash common.Hash) bool) error {
+func (b *backend) Start(chain consensus.ChainHeaderReader) error {
 	b.coreMu.Lock()
 	defer b.coreMu.Unlock()
 	if b.coreStarted {
 		return e2c.ErrStartedEngine
 	}
 
+	b.chain = chain
+	genesis := chain.GetHeaderByNumber(0)
+	if err := b.VerifyHeader(chain, genesis, false); err != nil {
+		fmt.Println(err)
+		return err
+	}
+	e2cExtra, err := types.ExtractE2CExtra(genesis)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+	b.leader = e2cExtra.Leader
+
 	if err := b.core.Start(); err != nil {
 		return err
 	}
 
 	b.coreStarted = true
-	for {
-		select {
-		case <-time.After(5 * time.Second):
-			break
-		}
-		if len(b.broadcaster.PeerSet()) == 3 {
-			break
-		}
-	}
-	fmt.Println("Started!")
 	return nil
 }
 
 // Stop implements consensus.Istanbul.Stop
 func (b *backend) Stop() error {
-	fmt.Println("Stopped!")
 	b.coreMu.Lock()
 	defer b.coreMu.Unlock()
 	if !b.coreStarted {

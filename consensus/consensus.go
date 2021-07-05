@@ -161,7 +161,7 @@ type E2C interface {
 	Engine
 
 	// Start starts the engine
-	Start(chain ChainHeaderReader, currentBlock func() *types.Block, hasBadBlock func(hash common.Hash) bool) error
+	Start(chain ChainHeaderReader) error
 
 	// Stop stops the engine
 	Stop() error

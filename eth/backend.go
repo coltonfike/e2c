@@ -307,6 +307,7 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 
 		return istanbulBackend.New(&config.Istanbul, stack.GetNodeKey(), db)
 	}
+	//@todo fix this
 	if chainConfig.E2C != nil {
 		if chainConfig.E2C.Epoch != 0 {
 			config.E2C.Epoch = chainConfig.E2C.Epoch
@@ -617,6 +618,10 @@ func (s *Ethereum) Start() error {
 	}
 	// Start the networking layer and the light server if requested
 	s.protocolManager.Start(maxPeers)
+
+	if e2c, ok := s.engine.(consensus.E2C); ok {
+		e2c.Start(s.blockchain)
+	}
 	return nil
 }
 
@@ -632,6 +637,9 @@ func (s *Ethereum) Stop() error {
 	s.txPool.Stop()
 	s.miner.Stop()
 	s.blockchain.Stop()
+	if e2c, ok := s.engine.(consensus.E2C); ok {
+		e2c.Stop()
+	}
 	s.engine.Close()
 	s.chainDb.Close()
 	s.eventMux.Stop()

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -44,6 +45,14 @@ func (c *core) loop() {
 			case e2c.NewBlockEvent:
 				if err := c.handleBlock(ev.Block); err != nil {
 					fmt.Println("Problem handling block:", err)
+				}
+			case e2c.RelayBlockEvent:
+				if err := c.handleRelay(ev.Header); err != nil {
+					fmt.Println("Problem handling relay:", err)
+				}
+			case e2c.BlameEvent:
+				if err := c.handleBlame(ev.Address); err != nil {
+					fmt.Println("Problem handling relay:", err)
 				}
 			}
 
@@ -79,7 +88,14 @@ func (c *core) handleCommit(block common.Hash) error {
 
 func (c *core) handleBlock(block *types.Block) error {
 
-	c.verify(block) // TODO: Handle potential errors from this
+	if err := c.verify(block); err != nil {
+		if err == consensus.ErrUnknownAncestor {
+			// @todo Request block from peers
+		} else {
+			c.backend.SendBlame(c.backend.Leader())
+			return err
+		}
+	} // @todo handle potential errors from this
 
 	fmt.Println("Valid block", block.Number().String(), "received!")
 	c.progressTimer.AddDuration(2 * c.delta * time.Millisecond)
@@ -99,5 +115,14 @@ func (c *core) handleBlock(block *types.Block) error {
 	}
 
 	c.expectedHeight.Add(c.expectedHeight, big.NewInt(1))
+	return nil
+}
+
+func (c *core) handleRelay(header *types.Header) error {
+	fmt.Println("Relay Received for block:", header.Number)
+	return nil
+}
+
+func (c *core) handleBlame(addr common.Address) error {
 	return nil
 }

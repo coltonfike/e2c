@@ -18,13 +18,11 @@ package core
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/event"
@@ -84,6 +82,14 @@ func (c *core) Stop() error {
 	return nil
 }
 
+func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
+	block, ok := c.queuedBlocks[hash]
+	if !ok {
+		return nil, errors.New("unknown block")
+	}
+	return block.block.Header(), nil
+}
+
 func (c *core) subscribeEvents() {
 	c.eventMux = c.backend.EventMux().Subscribe(
 		e2c.NewBlockEvent{},
@@ -116,25 +122,12 @@ func (c *core) resetTimer() error {
 }
 
 func (c *core) verify(block *types.Block) error {
-
 	if err := c.backend.Verify(block); err != nil {
-		if err != consensus.ErrUnknownAncestor {
-			return err
-		}
-
-		parent, exists := c.queuedBlocks[block.ParentHash()]
-		if !exists {
-			fmt.Println("Blocks Arrived Out of Order")
-			return nil // TODO: Return Error
-		}
-		// check this again, as it hasn't been checked due to there not being a parent
-		if parent.block.Number().Uint64()+1 != block.Number().Uint64() {
-			return err
-		}
-		// All ok, check equivocation
+		return err
 	}
-	if block.Number().Uint64() != c.expectedHeight.Uint64() {
-		return errors.New("Already received block at this height")
+	if block.Number().Cmp(c.expectedHeight) != 0 {
+		//@todo add real error here
+		return errors.New("already received block at this height")
 	}
 	return nil
 }

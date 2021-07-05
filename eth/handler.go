@@ -1071,9 +1071,9 @@ func (self *ProtocolManager) FindPeers(targets map[common.Address]bool) map[comm
 // End Quorum
 
 // E2C
-func (self *ProtocolManager) PeerSet() map[common.Address]consensus.Peer {
+func (pm *ProtocolManager) PeerSet() map[common.Address]consensus.Peer {
 	m := make(map[common.Address]consensus.Peer)
-	for _, p := range self.peers.Peers() {
+	for _, p := range pm.peers.Peers() {
 		pubKey := p.Node().Pubkey()
 		addr := crypto.PubkeyToAddress(*pubKey)
 		m[addr] = p
