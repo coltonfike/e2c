@@ -343,21 +343,20 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 
 	delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
 
-	if err = b.SendNewBlock(block); err != nil {
-		return err
-	}
-
 	go func() {
 		// wait for the timestamp of header, use this to adjust the block period
 		select {
 		case <-time.After(delay):
 			results <- block
+			if err = b.SendNewBlock(block); err != nil {
+				return
+			}
+			fmt.Println("Successfully sealed block", block.Number().String(), "with", len(block.Transactions()), "transactions.")
 		case <-stop:
 			return
 		}
 		// get the proposed block hash and clear it if the seal() is completed.
 	}()
-	fmt.Println("Successfully sealed block", block.Number().String(), "with", len(block.Transactions()), "transactions.")
 	return nil
 }
 
@@ -410,15 +409,15 @@ func (b *backend) Start(chain consensus.ChainHeaderReader, currentBlock func() *
 			break
 		}
 	}
-	fmt.Println("\n\n\nStarted!")
+	fmt.Println("Started!")
 	return nil
 }
 
 // Stop implements consensus.Istanbul.Stop
 func (b *backend) Stop() error {
+	fmt.Println("Stopped!")
 	b.coreMu.Lock()
 	defer b.coreMu.Unlock()
-	fmt.Println("\n\n\nStopped!")
 	if !b.coreStarted {
 		return e2c.ErrStoppedEngine
 	}
