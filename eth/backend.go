@@ -623,9 +623,6 @@ func (s *Ethereum) Start() error {
 	// Start the networking layer and the light server if requested
 	s.protocolManager.Start(maxPeers)
 
-	if e2c, ok := s.engine.(consensus.E2C); ok {
-		e2c.Start(s.blockchain)
-	}
 	return nil
 }
 
@@ -641,9 +638,6 @@ func (s *Ethereum) Stop() error {
 	s.txPool.Stop()
 	s.miner.Stop()
 	s.blockchain.Stop()
-	if e2c, ok := s.engine.(consensus.E2C); ok {
-		e2c.Stop()
-	}
 	s.engine.Close()
 	s.chainDb.Close()
 	s.eventMux.Stop()

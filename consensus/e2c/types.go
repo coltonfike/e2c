@@ -46,25 +46,29 @@ func (e *NewBlockEvent) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
+// @todo this doesn't need address. Rework this later to removed address
 type RelayBlockEvent struct {
-	Header *types.Header
+	Hash    common.Hash
+	Address common.Address
 }
 
 // EncodeRLP serializes b into the Ethereum RLP format.
 func (e *RelayBlockEvent) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, []interface{}{e.Header})
+	return rlp.Encode(w, []interface{}{e.Hash, e.Address})
 }
 
 // DecodeRLP implements rlp.Decoder, and load the consensus fields from a RLP stream.
 func (e *RelayBlockEvent) DecodeRLP(s *rlp.Stream) error {
 	var header struct {
-		Header *types.Header
+		Hash    common.Hash
+		Address common.Address
 	}
 
 	if err := s.Decode(&header); err != nil {
 		return err
 	}
-	e.Header = header.Header
+	e.Hash = header.Hash
+	e.Address = header.Address
 	return nil
 }
 
@@ -87,5 +91,53 @@ func (e *BlameEvent) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	e.Address = addr.Address
+	return nil
+}
+
+// @todo this doesn't need address. Rework this later to removed address
+type RequestBlockEvent struct {
+	Hash    common.Hash
+	Address common.Address
+}
+
+// EncodeRLP serializes b into the Ethereum RLP format.
+func (e *RequestBlockEvent) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{e.Hash, e.Address})
+}
+
+// DecodeRLP implements rlp.Decoder, and load the consensus fields from a RLP stream.
+func (e *RequestBlockEvent) DecodeRLP(s *rlp.Stream) error {
+	var request struct {
+		Hash    common.Hash
+		Address common.Address
+	}
+
+	if err := s.Decode(&request); err != nil {
+		return err
+	}
+	e.Hash = request.Hash
+	e.Address = request.Address
+	return nil
+}
+
+type RespondToRequestEvent struct {
+	Block *types.Block
+}
+
+// EncodeRLP serializes b into the Ethereum RLP format.
+func (e *RespondToRequestEvent) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{e.Block})
+}
+
+// DecodeRLP implements rlp.Decoder, and load the consensus fields from a RLP stream.
+func (e *RespondToRequestEvent) DecodeRLP(s *rlp.Stream) error {
+	var response struct {
+		Block *types.Block
+	}
+
+	if err := s.Decode(&response); err != nil {
+		return err
+	}
+	e.Block = response.Block
 	return nil
 }

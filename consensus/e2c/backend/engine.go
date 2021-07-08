@@ -376,7 +376,7 @@ func (b *backend) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 }
 
 // Start implements consensus.Istanbul.Start
-func (b *backend) Start(chain consensus.ChainHeaderReader) error {
+func (b *backend) Start(chain consensus.Chain) error {
 	b.coreMu.Lock()
 	defer b.coreMu.Unlock()
 	if b.coreStarted {
@@ -384,19 +384,20 @@ func (b *backend) Start(chain consensus.ChainHeaderReader) error {
 	}
 
 	b.chain = chain
-	genesis := chain.GetHeaderByNumber(0)
-	if err := b.VerifyHeader(chain, genesis, false); err != nil {
+	header := chain.CurrentHeader()
+	fmt.Println(header.Number.String())
+	if err := b.VerifyHeader(chain, header, false); err != nil {
 		fmt.Println(err)
 		return err
 	}
-	e2cExtra, err := types.ExtractE2CExtra(genesis)
+	e2cExtra, err := types.ExtractE2CExtra(header)
 	if err != nil {
 		fmt.Println(err)
 		return err
 	}
 	b.leader = e2cExtra.Leader
 
-	if err := b.core.Start(); err != nil {
+	if err := b.core.Start(header); err != nil {
 		return err
 	}
 
@@ -415,6 +416,7 @@ func (b *backend) Stop() error {
 		return err
 	}
 	b.coreStarted = false
+	fmt.Println("stopping to sync!")
 	return nil
 }
 

@@ -40,10 +40,16 @@ type Backend interface {
 	SendNewBlock(*types.Block) error
 
 	// Relays a block header to all peers
-	RelayBlock(*types.Header) error
+	RelayBlock(common.Hash) error
 
 	// Sends blame message to all peers
 	SendBlame(common.Address) error
+
+	// Requests a block from peers
+	RequestBlock(common.Hash, common.Address) error
+
+	// Responds to a request for a block
+	RespondToRequest(*types.Block, common.Address) error
 
 	// Commit delivers an approved proposal to backend.
 	// The delivered proposal will be put into blockchain.
@@ -52,12 +58,14 @@ type Backend interface {
 	// Verify verifies the block is valid
 	Verify(*types.Block) error
 
+	GetBlockFromChain(common.Hash) (*types.Block, error)
+
 	// Sign signs input data with the backend's private key
 	Sign([]byte) ([]byte, error)
 }
 
 type Engine interface {
-	Start() error
+	Start(*types.Header) error
 	Stop() error
 	GetQueuedBlock(common.Hash) (*types.Header, error)
 }

@@ -30,6 +30,8 @@ const (
 	newBlockMsgCode uint64 = iota
 	relayMsgCode
 	blameMsgCode
+	requestBlockMsgCode
+	respondToRequestMsgCode
 )
 
 type message struct {
@@ -76,6 +78,10 @@ func (m *message) FromPayload(b []byte) error {
 		return err
 	}
 
+	// we don't sign relay messages, so no need to validate
+	if m.Code == relayMsgCode || m.Code == requestBlockMsgCode || m.Code == respondToRequestMsgCode {
+		return nil
+	}
 	// Validate Message (on a Message without Signature)
 	var payload []byte
 	payload, err = m.PayloadNoSig()

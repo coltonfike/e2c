@@ -45,7 +45,7 @@ const (
 
 	// txChanSize is the size of channel listening to NewTxsEvent.
 	// The number is referenced from the size of tx pool.
-	txChanSize = 4096
+	txChanSize = 10000
 
 	// chainHeadChanSize is the size of channel listening to ChainHeadEvent.
 	chainHeadChanSize = 10
@@ -310,6 +310,9 @@ func (w *worker) start() {
 	if istanbul, ok := w.engine.(consensus.Istanbul); ok {
 		istanbul.Start(w.chain, w.chain.CurrentBlock, w.chain.HasBadBlock)
 	}
+	if e2c, ok := w.engine.(consensus.E2C); ok {
+		e2c.Start(w.chain)
+	}
 	w.startCh <- struct{}{}
 }
 
@@ -317,6 +320,9 @@ func (w *worker) start() {
 func (w *worker) stop() {
 	if istanbul, ok := w.engine.(consensus.Istanbul); ok {
 		istanbul.Stop()
+	}
+	if e2c, ok := w.engine.(consensus.E2C); ok {
+		e2c.Stop()
 	}
 	atomic.StoreInt32(&w.running, 0)
 }

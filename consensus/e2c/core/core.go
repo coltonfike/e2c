@@ -18,6 +18,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"time"
@@ -40,8 +41,10 @@ func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
 			block *types.Block
 			time  time.Time
 		}),
-		expectedHeight: big.NewInt(1), // TODO: Make this look for the block at the top of the chain!!!!
-		delta:          time.Duration(1000),
+		requestedBlocks: make(map[common.Hash]struct{}),
+		unhandledBlocks: make(map[common.Hash]*types.Block),
+		delta:           time.Duration(1000),
+		expectedHeight:  big.NewInt(0),
 	}
 
 	return c
@@ -59,6 +62,8 @@ type core struct {
 		block *types.Block
 		time  time.Time
 	}
+	requestedBlocks map[common.Hash]struct{}
+	unhandledBlocks map[common.Hash]*types.Block
 
 	expectedHeight *big.Int
 	backend        e2c.Backend
@@ -68,7 +73,9 @@ type core struct {
 	delta     time.Duration
 }
 
-func (c *core) Start() error {
+func (c *core) Start(header *types.Header) error {
+	c.expectedHeight.Add(header.Number, big.NewInt(1))
+	fmt.Println("expectedHeight:", c.expectedHeight)
 	c.commitTimer = time.NewTimer(time.Millisecond)
 	c.progressTimer = e2c.NewProgressTimer(4 * c.delta * time.Millisecond)
 	c.subscribeEvents()
@@ -83,11 +90,15 @@ func (c *core) Stop() error {
 }
 
 func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
-	block, ok := c.queuedBlocks[hash]
-	if !ok {
-		return nil, errors.New("unknown block")
+	b, ok := c.queuedBlocks[hash]
+	if ok {
+		return b.block.Header(), nil
 	}
-	return block.block.Header(), nil
+	block, ok := c.unhandledBlocks[hash]
+	if ok {
+		return block.Header(), nil
+	}
+	return nil, errors.New("unknown block")
 }
 
 func (c *core) subscribeEvents() {
@@ -95,6 +106,8 @@ func (c *core) subscribeEvents() {
 		e2c.NewBlockEvent{},
 		e2c.RelayBlockEvent{},
 		e2c.BlameEvent{},
+		e2c.RequestBlockEvent{},
+		e2c.RespondToRequestEvent{},
 	)
 }
 
@@ -134,4 +147,10 @@ func (c *core) verify(block *types.Block) error {
 
 func (c *core) delete(block common.Hash) {
 	delete(c.queuedBlocks, block)
+}
+
+// @todo add a timeout feature!
+func (c *core) requestBlock(hash common.Hash, addr common.Address) {
+	go c.backend.RequestBlock(hash, addr)
+	c.requestedBlocks[hash] = struct{}{}
 }

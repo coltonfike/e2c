@@ -19,6 +19,7 @@ package backend
 import (
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -73,7 +74,7 @@ type backend struct {
 	core        e2c.Engine
 	logger      log.Logger
 	db          ethdb.Database
-	chain       consensus.ChainHeaderReader
+	chain       consensus.Chain
 	sealMu      sync.Mutex
 	coreStarted bool
 	coreMu      sync.RWMutex
@@ -109,6 +110,7 @@ func (b *backend) Broadcast(payload []byte) error {
 
 	if b.broadcaster != nil {
 		ps := b.broadcaster.PeerSet()
+		fmt.Println("PeerSet:", len(ps))
 		for addr, p := range ps {
 			ms, ok := b.recentMessages.Get(addr)
 			var m *lru.ARCCache
@@ -149,9 +151,9 @@ func (b *backend) SendNewBlock(block *types.Block) error {
 	return nil
 }
 
-func (b *backend) RelayBlock(header *types.Header) error {
+func (b *backend) RelayBlock(hash common.Hash) error {
 
-	msg, err := Encode(&e2c.RelayBlockEvent{Header: header})
+	msg, err := Encode(&e2c.RelayBlockEvent{Hash: hash, Address: b.address})
 	if err != nil {
 		return err
 	}
@@ -161,7 +163,7 @@ func (b *backend) RelayBlock(header *types.Header) error {
 		Address: b.address,
 	}
 
-	payload, err := m.PayloadWithSig(b.Sign)
+	payload, err := m.PayloadNoSig()
 	if err != nil {
 		return err
 	}
@@ -185,6 +187,88 @@ func (b *backend) SendBlame(addr common.Address) error {
 		return err
 	}
 	go b.Broadcast(payload)
+	return nil
+}
+
+func (b *backend) RequestBlock(hash common.Hash, addr common.Address) error {
+
+	msg, err := Encode(&e2c.RequestBlockEvent{Hash: hash, Address: b.address})
+	if err != nil {
+		return err
+	}
+	m := &message{
+		Code:    requestBlockMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+	payload, err := m.PayloadNoSig()
+	if err != nil {
+		return err
+	}
+	// they are asking for the block from everyone
+	if addr == (common.Address{}) {
+		go b.Broadcast(payload)
+	} else { // requesting from a specific address
+		hash := e2c.RLPHash(payload)
+		ps := b.broadcaster.PeerSet()
+		p, ok := ps[addr]
+		if !ok {
+			return errors.New("No peer with that address")
+		}
+		ms, ok := b.recentMessages.Get(addr)
+		var m *lru.ARCCache
+		if ok {
+			m, _ = ms.(*lru.ARCCache)
+			if _, k := m.Get(hash); k {
+				// This peer had this event, skip it
+				return nil
+			}
+		} else {
+			m, _ = lru.NewARC(inmemoryMessages)
+		}
+
+		m.Add(hash, true)
+		b.recentMessages.Add(addr, m)
+		go p.SendConsensus(e2cMsg, payload)
+	}
+	return nil
+}
+
+func (b *backend) RespondToRequest(block *types.Block, addr common.Address) error {
+	msg, err := Encode(&e2c.RespondToRequestEvent{Block: block})
+	if err != nil {
+		return err
+	}
+	m := &message{
+		Code:    respondToRequestMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+	payload, err := m.PayloadNoSig()
+	if err != nil {
+		return err
+	}
+	hash := e2c.RLPHash(payload)
+	ps := b.broadcaster.PeerSet()
+	p, ok := ps[addr]
+	if !ok {
+		return errors.New("No peer with that address")
+	}
+	ms, ok := b.recentMessages.Get(addr)
+	var c *lru.ARCCache
+	if ok {
+		c, _ = ms.(*lru.ARCCache)
+		if _, k := c.Get(hash); k {
+			// This peer had this event, skip it
+			return nil
+		}
+	} else {
+		c, _ = lru.NewARC(inmemoryMessages)
+	}
+
+	c.Add(hash, true)
+	b.recentMessages.Add(addr, c)
+	go p.SendConsensus(e2cMsg, payload)
 	return nil
 }
 
@@ -218,6 +302,14 @@ func (b *backend) Verify(block *types.Block) error {
 		return err
 	}
 	return b.VerifyHeader(b.chain, block.Header(), false)
+}
+
+func (b *backend) GetBlockFromChain(hash common.Hash) (*types.Block, error) {
+	header := b.chain.GetHeaderByHash(hash)
+	if header == nil {
+		return nil, errors.New("Chain doesn't have block")
+	}
+	return b.chain.GetBlockByNumber(header.Number.Uint64()), nil
 }
 
 // Implements consensus.Engine.Close()
