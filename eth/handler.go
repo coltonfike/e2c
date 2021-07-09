@@ -906,8 +906,17 @@ func (pm *ProtocolManager) BroadcastBlock(block *types.Block, propagate bool) {
 			log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
 			return
 		}
-		// Send the block to a subset of our peers
-		transfer := peers[:int(math.Sqrt(float64(len(peers))))]
+
+		var transfer []*peer
+		// E2C sends to all peers, not just a subset
+		if _, ok := pm.engine.(consensus.E2C); ok {
+			// Send the block to all peers
+			transfer = peers
+		} else {
+			// Send the block to a subset of our peers
+			transfer = peers[:int(math.Sqrt(float64(len(peers))))]
+		}
+
 		for _, peer := range transfer {
 			peer.AsyncSendNewBlock(block, td)
 		}

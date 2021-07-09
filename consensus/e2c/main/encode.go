@@ -35,6 +35,6 @@ func Encode(vanity string, validators common.Address) (string, error) {
 }
 
 func main() {
-	addr := common.HexToAddress("0x8536571507DD25f52E0955e80bcD59c18427A371")
+	addr := common.HexToAddress("0x26519ea5fd73518efcf5ca13e6befab6836befce")
 	fmt.Println(Encode("0x00", addr))
 }

@@ -58,6 +58,8 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 		coreStarted:    false,
 		recentMessages: recentMessages,
 		knownMessages:  knownMessages,
+		// @ todo add a timeout feature for clientBlocks
+		clientBlocks: make(map[common.Hash]int),
 	}
 	backend.core = e2cCore.New(backend, backend.config)
 	return backend
@@ -87,6 +89,7 @@ type backend struct {
 
 	recentMessages *lru.ARCCache // the cache of peer's messages
 	knownMessages  *lru.ARCCache // the cache of self messages
+	clientBlocks   map[common.Hash]int
 }
 
 func (b *backend) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
