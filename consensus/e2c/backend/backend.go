@@ -19,9 +19,9 @@ package backend
 import (
 	"crypto/ecdsa"
 	"errors"
-	"fmt"
 	"math/big"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -77,7 +77,6 @@ type backend struct {
 	logger      log.Logger
 	db          ethdb.Database
 	chain       consensus.Chain
-	sealMu      sync.Mutex
 	coreStarted bool
 	coreMu      sync.RWMutex
 
@@ -113,7 +112,7 @@ func (b *backend) Broadcast(payload []byte) error {
 
 	if b.broadcaster != nil {
 		ps := b.broadcaster.PeerSet()
-		fmt.Println("PeerSet:", len(ps))
+		b.logger.Trace("E2C Broadcasted a message", "PeerSet", len(ps))
 		for addr, p := range ps {
 			ms, ok := b.recentMessages.Get(addr)
 			var m *lru.ARCCache
@@ -137,29 +136,35 @@ func (b *backend) Broadcast(payload []byte) error {
 
 func (b *backend) SendNewBlock(block *types.Block) error {
 
-	msg, err := Encode(&e2c.NewBlockEvent{Block: block})
+	b.logger.Debug("Broadcasted new block", "number", block.Number().Uint64(), "hash", block.Hash())
+	msg, err := Encode(block)
 	if err != nil {
 		return err
 	}
+
 	m := &message{
 		Code:    newBlockMsgCode,
 		Msg:     msg,
 		Address: b.address,
 	}
+
 	payload, err := m.PayloadWithSig(b.Sign)
 	if err != nil {
 		return err
 	}
+
 	go b.Broadcast(payload)
 	return nil
 }
 
 func (b *backend) RelayBlock(hash common.Hash) error {
 
-	msg, err := Encode(&e2c.RelayBlockEvent{Hash: hash, Address: b.address})
+	b.logger.Debug("Relayed block", "hash", hash)
+	msg, err := Encode(hash)
 	if err != nil {
 		return err
 	}
+
 	m := &message{
 		Code:    relayMsgCode,
 		Msg:     msg,
@@ -170,44 +175,52 @@ func (b *backend) RelayBlock(hash common.Hash) error {
 	if err != nil {
 		return err
 	}
+
 	go b.Broadcast(payload)
 	return nil
 }
 
-func (b *backend) SendBlame(addr common.Address) error {
+func (b *backend) SendBlame() error {
 
-	msg, err := Encode(&e2c.BlameEvent{Address: addr})
+	msg, err := Encode(time.Now())
 	if err != nil {
 		return err
 	}
+
 	m := &message{
 		Code:    blameMsgCode,
 		Msg:     msg,
 		Address: b.address,
 	}
+
 	payload, err := m.PayloadWithSig(b.Sign)
 	if err != nil {
 		return err
 	}
+
 	go b.Broadcast(payload)
 	return nil
 }
 
 func (b *backend) RequestBlock(hash common.Hash, addr common.Address) error {
 
-	msg, err := Encode(&e2c.RequestBlockEvent{Hash: hash, Address: b.address})
+	b.logger.Debug("Requesting block", "hash", hash, "addr", addr)
+	msg, err := Encode(hash)
 	if err != nil {
 		return err
 	}
+
 	m := &message{
 		Code:    requestBlockMsgCode,
 		Msg:     msg,
 		Address: b.address,
 	}
+
 	payload, err := m.PayloadNoSig()
 	if err != nil {
 		return err
 	}
+
 	// they are asking for the block from everyone
 	if addr == (common.Address{}) {
 		go b.Broadcast(payload)
@@ -216,6 +229,7 @@ func (b *backend) RequestBlock(hash common.Hash, addr common.Address) error {
 		ps := b.broadcaster.PeerSet()
 		p, ok := ps[addr]
 		if !ok {
+			// @todo add error for this
 			return errors.New("No peer with that address")
 		}
 		ms, ok := b.recentMessages.Get(addr)
@@ -238,19 +252,25 @@ func (b *backend) RequestBlock(hash common.Hash, addr common.Address) error {
 }
 
 func (b *backend) RespondToRequest(block *types.Block, addr common.Address) error {
-	msg, err := Encode(&e2c.RespondToRequestEvent{Block: block})
+
+	b.logger.Debug("Responding to request for block", "number", block.Number().Uint64(), "hash", block.Hash(), "addr", addr)
+
+	msg, err := Encode(block)
 	if err != nil {
 		return err
 	}
+
 	m := &message{
 		Code:    respondToRequestMsgCode,
 		Msg:     msg,
 		Address: b.address,
 	}
+
 	payload, err := m.PayloadNoSig()
 	if err != nil {
 		return err
 	}
+
 	hash := e2c.RLPHash(payload)
 	ps := b.broadcaster.PeerSet()
 	p, ok := ps[addr]
@@ -276,9 +296,8 @@ func (b *backend) RespondToRequest(block *types.Block, addr common.Address) erro
 }
 
 // Commit implements e2c.Backend.Commit
-func (b *backend) Commit(block *types.Block) error {
+func (b *backend) Commit(block *types.Block) {
 	b.broadcaster.Enqueue(fetcherID, block)
-	return nil
 }
 
 // EventMux implements e2c.Backend.EventMux
@@ -307,9 +326,15 @@ func (b *backend) Verify(block *types.Block) error {
 	return b.VerifyHeader(b.chain, block.Header(), false)
 }
 
+func (b *backend) ChangeView() {
+	b.leader = common.Address{}
+	b.logger.Info("View change has been triggered")
+}
+
 func (b *backend) GetBlockFromChain(hash common.Hash) (*types.Block, error) {
 	header := b.chain.GetHeaderByHash(hash)
 	if header == nil {
+		// @todo add this as error
 		return nil, errors.New("Chain doesn't have block")
 	}
 	return b.chain.GetBlockByNumber(header.Number.Uint64()), nil

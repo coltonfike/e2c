@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -56,12 +57,12 @@ func (b *backend) decode(msg p2p.Msg) ([]byte, common.Hash, error) {
 
 // HandleMsg implements consensus.Handler.HandleMsg
 func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
-
+	b.coreMu.Lock()
+	defer b.coreMu.Unlock()
 	if msg.Code == e2cMsg && b.coreStarted {
 
 		data, hash, err := b.decode(msg)
 		if err != nil {
-			fmt.Println(err)
 			return true, errDecodeFailed
 		}
 		// Mark peer's message
@@ -83,55 +84,60 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 
 		msg := new(message)
 		if err := msg.FromPayload(data); err != nil {
-			fmt.Println(err)
 			return true, err
 		}
 
 		switch msg.Code {
 		case newBlockMsgCode:
-			// @todo if block didn't come from leader, reject
-			var e e2c.NewBlockEvent
-			if err := msg.Decode(&e); err != nil {
-				fmt.Println(err)
+			// If this message isn't from the leader, then drop the peer
+			if msg.Address != b.leader {
+				return true, errUnauthorized
+			}
+
+			var block *types.Block
+			if err := msg.Decode(&block); err != nil {
 				return true, err
 			}
-			b.eventMux.Post(e)
+			b.eventMux.Post(e2c.NewBlockEvent{Block: block})
+
 		case relayMsgCode:
-			var e e2c.RelayBlockEvent
-			if err := msg.Decode(&e); err != nil {
-				fmt.Println(err)
+
+			var hash common.Hash
+			if err := msg.Decode(&hash); err != nil {
 				return true, err
 			}
-			b.eventMux.Post(e)
+			b.eventMux.Post(e2c.RelayBlockEvent{Hash: hash, Address: msg.Address})
+
 		case blameMsgCode:
-			var e e2c.BlameEvent
-			if err := msg.Decode(&e); err != nil {
-				fmt.Println(err)
+
+			var t time.Time
+			if err := msg.Decode(&t); err != nil {
 				return true, err
 			}
-			b.eventMux.Post(e)
+			b.eventMux.Post(e2c.BlameEvent{Time: t})
+
 		case requestBlockMsgCode:
-			var e e2c.RequestBlockEvent
-			if err := msg.Decode(&e); err != nil {
-				fmt.Println(err)
+
+			var request common.Hash
+			if err := msg.Decode(&request); err != nil {
 				return true, err
 			}
-			b.eventMux.Post(e)
+			b.eventMux.Post(e2c.RequestBlockEvent{Hash: request, Address: msg.Address})
+
 		case respondToRequestMsgCode:
-			var e e2c.RespondToRequestEvent
-			if err := msg.Decode(&e); err != nil {
-				fmt.Println(err)
+
+			var block *types.Block
+			if err := msg.Decode(&block); err != nil {
 				return true, err
 			}
-			b.eventMux.Post(e)
+			b.eventMux.Post(e2c.RespondToRequestEvent{Block: block})
 		}
+
 		return true, nil
 	}
 	//@todo, both of these lower ones need to be adjusted so that we only reject ones that we handle
 	// We commit our own blocks, and thus, don't want this to run on the protocol manager
 	if msg.Code == NewBlockMsg {
-		b.coreMu.Lock()
-		defer b.coreMu.Unlock()
 		// ignore if we aren't a client node
 		if b.coreStarted {
 			return true, nil
@@ -154,7 +160,7 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 
 		fmt.Println("Block received. Total acks for block", request.Block.Number().String(), ":", b.clientBlocks[request.Block.Hash()])
 		// @todo replace 2 with F
-		if b.clientBlocks[request.Block.Hash()] > 2 {
+		if b.clientBlocks[request.Block.Hash()] > 1 {
 			b.Commit(request.Block)
 			// delete parent block (since it may have been acked again) from our queue
 			delete(b.clientBlocks, request.Block.ParentHash())

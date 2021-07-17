@@ -18,6 +18,7 @@ package e2c
 
 import (
 	"io"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -46,7 +47,6 @@ func (e *NewBlockEvent) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-// @todo this doesn't need address. Rework this later to removed address
 type RelayBlockEvent struct {
 	Hash    common.Hash
 	Address common.Address
@@ -73,28 +73,27 @@ func (e *RelayBlockEvent) DecodeRLP(s *rlp.Stream) error {
 }
 
 type BlameEvent struct {
-	Address common.Address
+	Time time.Time
 }
 
 // EncodeRLP serializes b into the Ethereum RLP format.
 func (e *BlameEvent) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, []interface{}{e.Address})
+	return rlp.Encode(w, []interface{}{e.Time})
 }
 
 // DecodeRLP implements rlp.Decoder, and load the consensus fields from a RLP stream.
 func (e *BlameEvent) DecodeRLP(s *rlp.Stream) error {
-	var addr struct {
-		Address common.Address
+	var t struct {
+		Time time.Time
 	}
 
-	if err := s.Decode(&addr); err != nil {
+	if err := s.Decode(&t); err != nil {
 		return err
 	}
-	e.Address = addr.Address
+	e.Time = t.Time
 	return nil
 }
 
-// @todo this doesn't need address. Rework this later to removed address
 type RequestBlockEvent struct {
 	Hash    common.Hash
 	Address common.Address

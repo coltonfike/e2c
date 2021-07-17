@@ -18,7 +18,6 @@ package core
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 	"sync"
 	"time"
@@ -30,17 +29,17 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-// New creates an Istanbul consensus core
+// @todo bug where we commit a block and delete from queue, then receive the next block before fetcher has had time to add to chain
+// solution: delete block when new head event is triggered?
+
+// New creates an E2C consensus core
 func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
 	c := &core{
-		config:    config,
-		handlerWg: new(sync.WaitGroup),
-		logger:    log.New("address", backend.Address()),
-		backend:   backend,
-		queuedBlocks: make(map[common.Hash]struct {
-			block *types.Block
-			time  time.Time
-		}),
+		config:          config,
+		handlerWg:       new(sync.WaitGroup),
+		logger:          log.New(),
+		backend:         backend,
+		queuedBlocks:    make(map[common.Hash]*types.Block),
 		requestedBlocks: make(map[common.Hash]struct{}),
 		unhandledBlocks: make(map[common.Hash]*types.Block),
 		delta:           time.Duration(1000),
@@ -55,15 +54,12 @@ func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
 type core struct {
 	config        *e2c.Config
 	logger        log.Logger
-	commitTimer   *time.Timer // alert when a blocks timer expires
 	progressTimer *e2c.ProgressTimer
-	nextBlock     common.Hash              // Next block whose timer will go off
-	queuedBlocks  map[common.Hash]struct { // this is the queue of all blocks not yet committed
-		block *types.Block
-		time  time.Time
-	}
+
+	queuedBlocks    map[common.Hash]*types.Block
 	requestedBlocks map[common.Hash]struct{}
 	unhandledBlocks map[common.Hash]*types.Block
+	blamedBlocks    map[common.Hash]int
 
 	expectedHeight *big.Int
 	backend        e2c.Backend
@@ -75,8 +71,6 @@ type core struct {
 
 func (c *core) Start(header *types.Header) error {
 	c.expectedHeight.Add(header.Number, big.NewInt(1))
-	fmt.Println("expectedHeight:", c.expectedHeight)
-	c.commitTimer = time.NewTimer(time.Millisecond)
 	c.progressTimer = e2c.NewProgressTimer(4 * c.delta * time.Millisecond)
 	c.subscribeEvents()
 	go c.loop()
@@ -92,7 +86,7 @@ func (c *core) Stop() error {
 func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
 	b, ok := c.queuedBlocks[hash]
 	if ok {
-		return b.block.Header(), nil
+		return b.Header(), nil
 	}
 	block, ok := c.unhandledBlocks[hash]
 	if ok {
@@ -115,25 +109,6 @@ func (c *core) unsubscribeEvents() {
 	c.eventMux.Unsubscribe()
 }
 
-func (c *core) resetTimer() error {
-	earliestTime := time.Now()
-	var earliestBlock common.Hash
-
-	for block, t := range c.queuedBlocks {
-		if t.time.Before(earliestTime) {
-			earliestTime = t.time
-			earliestBlock = block
-		}
-	}
-
-	d := time.Until(earliestTime.Add(2 * c.delta * time.Millisecond))
-
-	c.commitTimer.Reset(d)
-	c.nextBlock = earliestBlock
-
-	return nil
-}
-
 func (c *core) verify(block *types.Block) error {
 	if err := c.backend.Verify(block); err != nil {
 		return err
@@ -143,10 +118,6 @@ func (c *core) verify(block *types.Block) error {
 		return errors.New("already received block at this height")
 	}
 	return nil
-}
-
-func (c *core) delete(block common.Hash) {
-	delete(c.queuedBlocks, block)
 }
 
 // @todo add a timeout feature!

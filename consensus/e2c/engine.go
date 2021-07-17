@@ -43,7 +43,7 @@ type Backend interface {
 	RelayBlock(common.Hash) error
 
 	// Sends blame message to all peers
-	SendBlame(common.Address) error
+	SendBlame() error
 
 	// Requests a block from peers
 	RequestBlock(common.Hash, common.Address) error
@@ -51,9 +51,8 @@ type Backend interface {
 	// Responds to a request for a block
 	RespondToRequest(*types.Block, common.Address) error
 
-	// Commit delivers an approved proposal to backend.
-	// The delivered proposal will be put into blockchain.
-	Commit(*types.Block) error
+	// The block will be put into blockchain.
+	Commit(*types.Block)
 
 	// Verify verifies the block is valid
 	Verify(*types.Block) error
@@ -62,6 +61,8 @@ type Backend interface {
 
 	// Sign signs input data with the backend's private key
 	Sign([]byte) ([]byte, error)
+
+	ChangeView()
 }
 
 type Engine interface {

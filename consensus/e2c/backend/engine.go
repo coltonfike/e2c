@@ -19,7 +19,6 @@ package backend
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -232,8 +231,18 @@ func (b *backend) verifySigner(chain consensus.ChainHeaderReader, header *types.
 	}
 
 	// Signer should be in the validator set of previous block's extraData.
-	if signer != b.leader {
-		return errUnauthorized
+	if b.coreStarted {
+		if signer != b.leader {
+			return errUnauthorized
+		}
+	} else {
+		snap, err := b.snapshot(chain, number-1, header.ParentHash, parents)
+		if err != nil {
+			return err
+		}
+		if signer != snap.Leader {
+			return errUnauthorized
+		}
 	}
 	return nil
 }
@@ -311,6 +320,7 @@ func (b *backend) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header 
 
 // Seal generates a new block for the given input block with the local miner's
 // seal place on top.
+
 func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 
 	// update the block header timestamp and signature and propose the block to core engine
@@ -332,15 +342,22 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 
 	delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
 
+	// results <- block
+	//
+	// if err = b.SendNewBlock(block); err != nil {
+	// return err
+	// }
+	// fmt.Println("Successfully sealed block", block.Number().String(), "with", len(block.Transactions()), "transactions.")
+	// return nil
 	go func() {
-		// wait for the timestamp of header, use this to adjust the block period
+		//		wait for the timestamp of header, use this to adjust the block period
 		select {
 		case <-time.After(delay):
 			results <- block
 			if err = b.SendNewBlock(block); err != nil {
 				return
 			}
-			fmt.Println("Successfully sealed block", block.Number().String(), "with", len(block.Transactions()), "transactions.")
+			b.logger.Info("E2C Engine successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
 		case <-stop:
 			return
 		}
@@ -385,14 +402,11 @@ func (b *backend) Start(chain consensus.Chain) error {
 
 	b.chain = chain
 	header := chain.CurrentHeader()
-	fmt.Println(header.Number.String())
 	if err := b.VerifyHeader(chain, header, false); err != nil {
-		fmt.Println(err)
 		return err
 	}
 	e2cExtra, err := types.ExtractE2CExtra(header)
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 	b.leader = e2cExtra.Leader
@@ -416,7 +430,6 @@ func (b *backend) Stop() error {
 		return err
 	}
 	b.coreStarted = false
-	fmt.Println("stopping to sync!")
 	return nil
 }
 
