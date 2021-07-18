@@ -159,12 +159,10 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		}
 
 		fmt.Println("Block received. Total acks for block", request.Block.Number().String(), ":", b.clientBlocks[request.Block.Hash()])
-		// @todo replace 2 with F
-		if b.clientBlocks[request.Block.Hash()] > 1 {
+		if b.clientBlocks[request.Block.Hash()] >= b.config.F {
 			b.Commit(request.Block)
 
-			// @todo replace this with delta
-			time.AfterFunc(3*1000*time.Millisecond, func() {
+			time.AfterFunc(3*b.config.Delta*time.Millisecond, func() {
 				delete(b.clientBlocks, request.Block.Hash())
 			})
 			fmt.Println("Client committed block", request.Block.Number().String())

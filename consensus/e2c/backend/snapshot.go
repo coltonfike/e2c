@@ -30,8 +30,6 @@ const (
 
 // Snapshot is the state of the authorization voting at a given point in time.
 type Snapshot struct {
-	Epoch uint64 // The number of blocks after which to checkpoint and reset the pending votes
-
 	Number uint64      // Block number where the snapshot was created
 	Hash   common.Hash // Block hash where the snapshot was created
 	Leader common.Address
@@ -40,9 +38,8 @@ type Snapshot struct {
 // newSnapshot create a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent validators, so only ever use if for
 // the genesis block.
-func newSnapshot(epoch uint64, number uint64, hash common.Hash, leader common.Address) *Snapshot {
+func newSnapshot(number uint64, hash common.Hash, leader common.Address) *Snapshot {
 	snap := &Snapshot{
-		Epoch:  epoch,
 		Number: number,
 		Hash:   hash,
 		Leader: leader,
@@ -51,7 +48,7 @@ func newSnapshot(epoch uint64, number uint64, hash common.Hash, leader common.Ad
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(epoch uint64, db ethdb.Database, hash common.Hash) (*Snapshot, error) {
+func loadSnapshot(db ethdb.Database, hash common.Hash) (*Snapshot, error) {
 	blob, err := db.Get(append([]byte(dbKeySnapshotPrefix), hash[:]...))
 	if err != nil {
 		return nil, err
@@ -60,7 +57,6 @@ func loadSnapshot(epoch uint64, db ethdb.Database, hash common.Hash) (*Snapshot,
 	if err := json.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
-	snap.Epoch = epoch
 
 	return snap, nil
 }
@@ -77,7 +73,6 @@ func (s *Snapshot) store(db ethdb.Database) error {
 // copy creates a deep copy of the snapshot, though not the individual votes.
 func (s *Snapshot) copy() *Snapshot {
 	cpy := &Snapshot{
-		Epoch:  s.Epoch,
 		Number: s.Number,
 		Hash:   s.Hash,
 		Leader: s.Leader,
@@ -111,7 +106,6 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 }
 
 type snapshotJSON struct {
-	Epoch  uint64         `json:"epoch"`
 	Number uint64         `json:"number"`
 	Hash   common.Hash    `json:"hash"`
 	Leader common.Address `json:"leader"`
@@ -119,7 +113,6 @@ type snapshotJSON struct {
 
 func (s *Snapshot) toJSONStruct() *snapshotJSON {
 	return &snapshotJSON{
-		Epoch:  s.Epoch,
 		Number: s.Number,
 		Hash:   s.Hash,
 		Leader: s.Leader,
@@ -133,7 +126,6 @@ func (s *Snapshot) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
-	s.Epoch = j.Epoch
 	s.Number = j.Number
 	s.Hash = j.Hash
 	s.Leader = j.Leader

@@ -30,7 +30,6 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique"
-	"github.com/ethereum/go-ethereum/consensus/e2c"
 	e2cBackend "github.com/ethereum/go-ethereum/consensus/e2c/backend"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/istanbul"
@@ -313,12 +312,15 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 	}
 	//@todo fix this
 	if chainConfig.E2C != nil {
-		if chainConfig.E2C.Epoch != 0 {
-			config.E2C.Epoch = chainConfig.E2C.Epoch
+		if chainConfig.E2C.Period != 0 {
+			config.E2C.Period = chainConfig.E2C.Period
 		}
-		config.E2C.ProposerPolicy = e2c.ProposerPolicy(chainConfig.E2C.ProposerPolicy)
-		config.E2C.Ceil2Nby3Block = chainConfig.E2C.Ceil2Nby3Block
-		config.E2C.AllowedFutureBlockTime = config.Miner.AllowedFutureBlockTime //Quorum
+		if chainConfig.E2C.Delta != 0 {
+			config.E2C.Delta = chainConfig.E2C.Delta
+		}
+		if chainConfig.E2C.F != 0 {
+			config.E2C.F = chainConfig.E2C.F
+		}
 
 		return e2cBackend.New(&config.E2C, stack.GetNodeKey(), db)
 	}

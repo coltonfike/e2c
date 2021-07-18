@@ -88,10 +88,10 @@ func (c *core) handleBlock(p *proposal) error {
 	}
 
 	c.logger.Info("Valid block received", "number", p.block.Number().Uint64(), "hash", p.block.Hash())
-	c.progressTimer.AddDuration(2 * c.delta * time.Millisecond)
+	c.progressTimer.AddDuration(2 * c.config.Delta * time.Millisecond)
 	c.backend.RelayBlock(p.block.Hash())
 
-	time.AfterFunc(2*c.delta*time.Millisecond, func() {
+	time.AfterFunc(2*c.config.Delta*time.Millisecond, func() {
 		c.commit(p.block)
 	})
 	p.status = HANDLED
@@ -122,7 +122,7 @@ func (c *core) handleBlame(t time.Time, addr common.Address) error {
 	}
 
 	c.logger.Info("Blame message received", "total blame", len(c.blame))
-	if len(c.blame) > 1 {
+	if uint64(len(c.blame)) >= c.config.F {
 		atomic.StoreUint32(&c.viewChange, 1)
 		c.backend.ChangeView()
 	}

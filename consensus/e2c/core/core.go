@@ -52,7 +52,6 @@ func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
 		logger:         log.New(),
 		backend:        backend,
 		queuedBlocks:   make(map[common.Hash]*proposal),
-		delta:          time.Duration(1000),
 		expectedHeight: big.NewInt(0),
 		blame:          make(map[common.Address]struct{}),
 	}
@@ -76,12 +75,11 @@ type core struct {
 
 	handlerWg  *sync.WaitGroup
 	viewChange uint32
-	delta      time.Duration
 }
 
 func (c *core) Start(header *types.Header) error {
 	c.expectedHeight.Add(header.Number, big.NewInt(1))
-	c.progressTimer = e2c.NewProgressTimer(4 * c.delta * time.Millisecond)
+	c.progressTimer = e2c.NewProgressTimer(4 * c.config.Delta * time.Millisecond)
 	c.subscribeEvents()
 	atomic.StoreUint32(&c.viewChange, 0)
 	go c.loop()
@@ -152,7 +150,7 @@ func (c *core) requestBlock(hash common.Hash, addr common.Address) {
 
 func (c *core) sendBlame() {
 	c.blame[c.backend.Address()] = struct{}{}
-	time.AfterFunc(2*c.delta*time.Millisecond, func() {
+	time.AfterFunc(2*c.config.Delta*time.Millisecond, func() {
 		delete(c.blame, c.backend.Address())
 	})
 	c.backend.SendBlame()

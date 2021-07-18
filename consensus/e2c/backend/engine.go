@@ -110,8 +110,7 @@ func (b *backend) verifyHeader(chain consensus.ChainHeaderReader, header *types.
 	}
 
 	// Don't waste time checking blocks from the future (adjusting for allowed threshold)
-	adjustedTimeNow := now().Add(time.Duration(b.config.AllowedFutureBlockTime) * time.Second).Unix()
-	if header.Time > uint64(adjustedTimeNow) {
+	if header.Time > uint64(now().Unix()) {
 		return consensus.ErrFutureBlock
 	}
 
@@ -166,7 +165,7 @@ func (b *backend) verifyCascadingFields(chain consensus.ChainHeaderReader, heade
 			return consensus.ErrUnknownAncestor
 		}
 	}
-	if parent.Time+b.config.BlockPeriod > header.Time {
+	if parent.Time+b.config.Period > header.Time {
 		return errInvalidTimestamp
 	}
 	if err := b.verifySigner(chain, header, parents); err != nil {
@@ -288,7 +287,7 @@ func (b *backend) Prepare(chain consensus.ChainHeaderReader, header *types.Heade
 	header.Extra = extra
 
 	// set header's timestamp
-	header.Time = parent.Time + b.config.BlockPeriod
+	header.Time = parent.Time + b.config.Period
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
 	}
@@ -451,7 +450,7 @@ func (b *backend) snapshot(chain consensus.ChainHeaderReader, number uint64, has
 		}
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
-			if s, err := loadSnapshot(b.config.Epoch, b.db, hash); err == nil {
+			if s, err := loadSnapshot(b.db, hash); err == nil {
 				log.Trace("Loaded voting snapshot form disk", "number", number, "hash", hash)
 				snap = s
 				break
@@ -467,7 +466,7 @@ func (b *backend) snapshot(chain consensus.ChainHeaderReader, number uint64, has
 			if err != nil {
 				return nil, err
 			}
-			snap = newSnapshot(b.config.Epoch, 0, genesis.Hash(), e2cExtra.Leader)
+			snap = newSnapshot(0, genesis.Hash(), e2cExtra.Leader)
 			if err := snap.store(b.db); err != nil {
 				return nil, err
 			}
