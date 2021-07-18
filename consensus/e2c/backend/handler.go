@@ -114,7 +114,7 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			if err := msg.Decode(&t); err != nil {
 				return true, err
 			}
-			b.eventMux.Post(e2c.BlameEvent{Time: t})
+			b.eventMux.Post(e2c.BlameEvent{Time: t, Address: msg.Address})
 
 		case requestBlockMsgCode:
 
@@ -162,9 +162,11 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		// @todo replace 2 with F
 		if b.clientBlocks[request.Block.Hash()] > 1 {
 			b.Commit(request.Block)
-			// delete parent block (since it may have been acked again) from our queue
-			delete(b.clientBlocks, request.Block.ParentHash())
-			delete(b.clientBlocks, request.Block.Hash())
+
+			// @todo replace this with delta
+			time.AfterFunc(3*1000*time.Millisecond, func() {
+				delete(b.clientBlocks, request.Block.Hash())
+			})
 			fmt.Println("Client committed block", request.Block.Number().String())
 		}
 		return true, nil

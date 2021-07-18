@@ -19,12 +19,12 @@ package core
 import (
 	"errors"
 	"math/big"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
-	"github.com/ethereum/go-ethereum/core/types"
 )
 
 func (c *core) loop() {
@@ -43,53 +43,58 @@ func (c *core) loop() {
 
 			switch ev := event.Data.(type) {
 			case e2c.NewBlockEvent:
-				c.handleBlock(ev.Block)
+				if _, ok := c.queuedBlocks[ev.Block.Hash()]; !ok {
+					c.queuedBlocks[ev.Block.Hash()] = &proposal{
+						block: ev.Block,
+					}
+				}
+				c.handleBlock(c.queuedBlocks[ev.Block.Hash()])
 			case e2c.RelayBlockEvent:
 				c.handleRelay(ev.Hash, ev.Address)
 			case e2c.BlameEvent:
-				c.handleBlame(ev.Time)
+				c.handleBlame(ev.Time, ev.Address)
 			case e2c.RequestBlockEvent:
 				c.handleRequest(ev.Hash, ev.Address)
 			case e2c.RespondToRequestEvent:
-				c.handleResponse(ev.Block)
+				p := c.queuedBlocks[ev.Block.Hash()]
+				p.block = ev.Block
+				c.handleResponse(p)
 			}
 
 		case <-c.progressTimer.Chan():
-			// c.backend.SendBlame(common.Hash{})
-			c.logger.Info("Progress Timer expired! Sending Blame message!")
+			if c.backend.Address() != c.backend.Leader() {
+				c.sendBlame()
+				c.logger.Info("Progress Timer expired! Sending Blame message!")
+			}
 		}
 	}
 }
 
-func (c *core) handleCommit(block *types.Block) {
-	c.backend.Commit(block)
-	delete(c.queuedBlocks, block.Hash())
-	c.logger.Info("Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())
-}
+func (c *core) handleBlock(p *proposal) error {
 
-func (c *core) handleBlock(block *types.Block) error {
-
-	if err := c.verify(block); err != nil {
+	if err := c.verify(p.block); err != nil {
 		if err == consensus.ErrUnknownAncestor {
+
 			// @todo if expected block is n and what we got is k > n+1, we request 1 at a time. Fix this to request all at once
-			c.requestBlock(block.ParentHash(), common.Address{})
-			c.unhandledBlocks[block.Hash()] = block
-			c.logger.Debug("Requesting missing block", "hash", block.Hash())
+
+			p.status = UNHANDLED
+			c.requestBlock(p.block.ParentHash(), common.Address{})
+			c.logger.Debug("Requesting missing block", "hash", p.block.Hash())
 			return nil
 		} else {
-			// c.backend.SendBlame()
+			c.sendBlame()
 			return err
 		}
-	} // @todo handle potential errors from this
+	}
 
-	c.logger.Info("Valid block received", "number", block.Number().Uint64(), "hash", block.Hash())
+	c.logger.Info("Valid block received", "number", p.block.Number().Uint64(), "hash", p.block.Hash())
 	c.progressTimer.AddDuration(2 * c.delta * time.Millisecond)
-	c.backend.RelayBlock(block.Hash())
+	c.backend.RelayBlock(p.block.Hash())
 
-	c.queuedBlocks[block.Hash()] = block
-	go time.AfterFunc(2*c.delta*time.Millisecond, func() {
-		c.handleCommit(block)
+	time.AfterFunc(2*c.delta*time.Millisecond, func() {
+		c.commit(p.block)
 	})
+	p.status = HANDLED
 
 	c.expectedHeight.Add(c.expectedHeight, big.NewInt(1))
 	return nil
@@ -105,29 +110,22 @@ func (c *core) handleRelay(hash common.Hash, addr common.Address) error {
 	if _, ok := c.queuedBlocks[hash]; ok {
 		return nil
 	}
-	if _, ok := c.unhandledBlocks[hash]; ok {
-		return nil
-	}
 
 	c.requestBlock(hash, addr)
 	return nil
 }
 
-func (c *core) handleBlame(t time.Time) error {
+func (c *core) handleBlame(t time.Time, addr common.Address) error {
 
-	/*
-		fmt.Println("Blame Received!")
-		if _, ok := c.blamedBlocks[hash]; !ok {
-			c.blamedBlocks[hash] = 1
-		} else {
-			c.blamedBlocks[hash]++
-		}
+	if _, ok := c.blame[addr]; !ok {
+		c.blame[addr] = struct{}{}
+	}
 
-		if c.blamedBlocks[hash] > 1 {
-			// trigger view change!
-			c.backend.ChangeView()
-		}
-	*/
+	c.logger.Info("Blame message received", "total blame", len(c.blame))
+	if len(c.blame) > 1 {
+		atomic.StoreUint32(&c.viewChange, 1)
+		c.backend.ChangeView()
+	}
 	return nil
 }
 
@@ -136,36 +134,31 @@ func (c *core) handleRequest(hash common.Hash, addr common.Address) error {
 	c.logger.Debug("Request Received", "hash", hash, "address", addr)
 	block, err := c.backend.GetBlockFromChain(hash)
 	if err != nil {
-		b, ok := c.queuedBlocks[hash]
-		if !ok {
+		p, ok := c.queuedBlocks[hash]
+		if !ok || p.status != HANDLED {
 			c.logger.Debug("Don't have requested block", "hash", hash, "address", addr)
 			return errors.New("don't have requested block")
 		}
-		block = b
+		block = p.block
 	}
 
 	go c.backend.RespondToRequest(block, addr)
 	return nil
 }
 
-func (c *core) handleResponse(block *types.Block) error {
+func (c *core) handleResponse(p *proposal) error {
 
-	if _, ok := c.requestedBlocks[block.Hash()]; !ok {
-		c.logger.Debug("Received response for unrequested block", "number", block.Number().Uint64(), "hash", block.Hash())
-		return errors.New("didn't request block")
-	}
+	c.logger.Debug("Response to request received", "number", p.block.Number().Uint64(), "hash", p.block.Hash())
 
-	c.logger.Debug("Response to request received", "number", block.Number().Uint64(), "hash", block.Hash())
-	delete(c.requestedBlocks, block.Hash())
-	if err := c.handleBlock(block); err != nil {
+	p.status = UNHANDLED
+	if err := c.handleBlock(p); err != nil {
 		return err
 	}
 
-	for _, unhandledBlock := range c.unhandledBlocks {
-		if unhandledBlock.ParentHash() == block.Hash() {
-			c.handleBlock(unhandledBlock)
-			delete(c.unhandledBlocks, unhandledBlock.Hash())
-			block = unhandledBlock
+	for _, unhandled := range c.queuedBlocks {
+		if unhandled.status == UNHANDLED && unhandled.block.ParentHash() == p.block.Hash() {
+			c.handleBlock(unhandled)
+			p = unhandled
 		}
 	}
 	return nil
