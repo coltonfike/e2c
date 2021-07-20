@@ -85,8 +85,11 @@ func (c *core) Stop() error {
 
 func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
 	b, ok := c.blockQueue.get(hash)
-	if ok && b.status != REQUESTED {
-		return b.block.Header(), nil
+	if ok {
+		return b.Header(), nil
+	}
+	if b, ok = c.blockQueue.unhandled[hash]; ok {
+		return b.Header(), nil
 	}
 	return nil, errors.New("unknown block")
 }

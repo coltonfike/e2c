@@ -56,8 +56,8 @@ func (c *core) loop() {
 			}
 
 		case <-c.blockQueue.c():
-			if p, ok := c.blockQueue.getNext(); ok {
-				c.commit(p.block)
+			if block, ok := c.blockQueue.getNext(); ok {
+				c.commit(block)
 			}
 
 		case <-c.progressTimer.Chan():
@@ -71,6 +71,10 @@ func (c *core) loop() {
 
 func (c *core) handleBlock(block *types.Block) error {
 
+	if _, ok := c.blockQueue.get(block.Hash()); ok {
+		return nil
+	}
+
 	if err := c.verify(block); err != nil {
 		if err == consensus.ErrUnknownAncestor {
 
@@ -81,20 +85,19 @@ func (c *core) handleBlock(block *types.Block) error {
 			c.logger.Debug("Requesting missing block", "hash", block.Hash())
 			return nil
 		} else {
+			c.logger.Warn("Sending Blame", "err", err)
 			c.sendBlame()
 			return err
 		}
 	}
 
+	delete(c.blockQueue.requestQueue, block.Hash())
+	delete(c.blockQueue.unhandled, block.Hash())
 	c.logger.Info("Valid block received", "number", block.Number().Uint64(), "hash", block.Hash())
 	c.progressTimer.AddDuration(2 * c.config.Delta * time.Millisecond)
 	c.backend.RelayBlock(block.Hash())
 
-	c.blockQueue.insert(&proposal{
-		block:  block,
-		status: HANDLED,
-		time:   time.Now(),
-	})
+	c.blockQueue.insert(block)
 
 	c.expectedHeight.Add(c.expectedHeight, big.NewInt(1))
 	return nil
@@ -108,6 +111,12 @@ func (c *core) handleRelay(hash common.Hash, addr common.Address) error {
 		return nil
 	}
 	if _, ok := c.blockQueue.get(hash); ok {
+		return nil
+	}
+	if _, ok := c.blockQueue.unhandled[hash]; ok {
+		return nil
+	}
+	if _, ok := c.blockQueue.requestQueue[hash]; ok {
 		return nil
 	}
 
@@ -135,11 +144,11 @@ func (c *core) handleRequest(hash common.Hash, addr common.Address) error {
 	block, err := c.backend.GetBlockFromChain(hash)
 	if err != nil {
 		p, ok := c.blockQueue.get(hash)
-		if !ok || p.status != HANDLED {
+		if !ok {
 			c.logger.Debug("Don't have requested block", "hash", hash, "address", addr)
 			return errors.New("don't have requested block")
 		}
-		block = p.block
+		block = p
 	}
 
 	go c.backend.RespondToRequest(block, addr)
@@ -148,15 +157,21 @@ func (c *core) handleRequest(hash common.Hash, addr common.Address) error {
 
 func (c *core) handleResponse(block *types.Block) error {
 
+	if _, ok := c.blockQueue.requestQueue[block.Hash()]; !ok {
+		return nil
+	}
+
 	c.logger.Debug("Response to request received", "number", block.Number().Uint64(), "hash", block.Hash())
 
 	if err := c.handleBlock(block); err != nil {
 		return err
 	}
+	delete(c.blockQueue.requestQueue, block.Hash())
 
 	for _, unhandled := range c.blockQueue.unhandled {
 		if unhandled.ParentHash() == block.Hash() {
 			c.handleBlock(unhandled)
+			delete(c.blockQueue.unhandled, unhandled.Hash())
 			block = unhandled
 		}
 	}

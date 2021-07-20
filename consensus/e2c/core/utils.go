@@ -14,9 +14,8 @@ const (
 )
 
 type proposal struct {
-	block  *types.Block
-	status uint8
-	time   time.Time
+	block *types.Block
+	time  time.Time
 }
 
 type blockQueue struct {
@@ -58,18 +57,25 @@ func (bq *blockQueue) addUnhandled(block *types.Block) {
 	bq.unhandled[block.Hash()] = block
 }
 
-func (bq *blockQueue) insert(p *proposal) {
+func (bq *blockQueue) insert(block *types.Block) {
 	if bq.size == 0 {
 		bq.timer.Reset(2 * bq.delta * time.Millisecond)
-		bq.nextBlock = p.block.Hash()
+		bq.nextBlock = block.Hash()
 	}
-	bq.queue[p.block.Hash()] = p
+	bq.queue[block.Hash()] = &proposal{
+		block: block,
+		time:  time.Now(),
+	}
 	bq.size++
 }
 
-func (bq *blockQueue) get(hash common.Hash) (*proposal, bool) {
+func (bq *blockQueue) get(hash common.Hash) (*types.Block, bool) {
 	p, ok := bq.queue[hash]
-	return p, ok
+	if !ok {
+		return nil, ok
+	}
+	//fmt.Println("ok", ok, "Hash:", hash, "bq.last:", bq.lastBlock, "bq.next:", bq.nextBlock)
+	return p.block, ok
 }
 
 func (bq *blockQueue) delete(hash common.Hash) {
@@ -97,15 +103,17 @@ func (bq *blockQueue) c() <-chan time.Time {
 	return bq.timer.C
 }
 
-func (bq *blockQueue) getNext() (*proposal, bool) {
-	if len(bq.queue) == 0 {
+func (bq *blockQueue) getNext() (*types.Block, bool) {
+	if bq.size == 0 {
 		bq.timer.Reset(time.Millisecond)
 		return nil, false
 	}
 	bq.delete(bq.lastBlock)
 	p, _ := bq.get(bq.nextBlock)
+	//fmt.Println(p)
 	bq.lastBlock = bq.nextBlock
 	bq.resetTimer()
 	bq.size--
+	//fmt.Println(p)
 	return p, true
 }

@@ -230,7 +230,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	_, e2c := engine.(consensus.E2C)
 	if istanbul || e2c || !chainConfig.IsQuorum || chainConfig.Clique != nil {
 		if e2c {
-			//	worker.e2c = true
+			worker.e2c = true
 		}
 		// Subscribe NewTxsEvent for tx pool
 		worker.txsSub = eth.TxPool().SubscribeNewTxsEvent(worker.txsCh)
@@ -567,7 +567,7 @@ func (w *worker) mainLoop() {
 			atomic.AddInt32(&w.newTxs, int32(len(ev.Txs)))
 
 			// when e2c gets 200 txs, it should commit
-			if w.e2c && atomic.LoadInt32(&w.newTxs) > 200 {
+			if w.e2c && atomic.LoadInt32(&w.newTxs) > 500 {
 				w.commitNewWork(nil, false, time.Now().Unix())
 			}
 
@@ -1085,7 +1085,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	// empty block is necessary to keep the liveness of the network.
 
 	// noempty means the exact opposite for e2c. noempty being true actually means make an empty block
-	if (w.e2c && atomic.LoadInt32(&w.newTxs) < 200 && !noempty) || (!w.e2c && len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0) {
+	if (w.e2c && atomic.LoadInt32(&w.newTxs) < 500 && !noempty) || (!w.e2c && len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0) {
 		w.updateSnapshot()
 		return
 	}

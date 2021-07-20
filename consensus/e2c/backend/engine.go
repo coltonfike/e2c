@@ -342,29 +342,29 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	}
 	//}
 
-	delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
+	// delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
 
+	results <- block
+
+	if err = b.SendNewBlock(block); err != nil {
+		return err
+	}
+	b.logger.Info("E2C Engine successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
+	return nil
+	// go func() {
+	//					wait for the timestamp of header, use this to adjust the block period
+	// select {
+	// case <-time.After(delay):
 	// results <- block
-	//
 	// if err = b.SendNewBlock(block); err != nil {
-	// return err
+	// return
 	// }
 	// b.logger.Info("E2C Engine successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
+	// case <-stop:
+	// return
+	// }
+	// }()
 	// return nil
-	go func() {
-		//					wait for the timestamp of header, use this to adjust the block period
-		select {
-		case <-time.After(delay):
-			results <- block
-			if err = b.SendNewBlock(block); err != nil {
-				return
-			}
-			b.logger.Info("E2C Engine successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
-		case <-stop:
-			return
-		}
-	}()
-	return nil
 }
 
 // update timestamp and signature of the block based on its number of transactions
