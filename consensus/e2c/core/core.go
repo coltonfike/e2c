@@ -30,28 +30,18 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-const (
-	HANDLED   = 0
-	UNHANDLED = 1
-	REQUESTED = 2
-)
-
-type proposal struct {
-	block  *types.Block
-	status uint8
-}
-
 // @todo bug where we commit a block and delete from queue, then receive the next block before fetcher has had time to add to chain
 // solution: delete block when new head event is triggered?
 
 // New creates an E2C consensus core
 func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
 	c := &core{
-		config:         config,
-		handlerWg:      new(sync.WaitGroup),
-		logger:         log.New(),
-		backend:        backend,
-		queuedBlocks:   make(map[common.Hash]*proposal),
+		config:    config,
+		handlerWg: new(sync.WaitGroup),
+		logger:    log.New(),
+		backend:   backend,
+		//queuedBlocks:   make(map[common.Hash]*proposal),
+		blockQueue:     NewBlockQueue(config.Delta),
 		expectedHeight: big.NewInt(0),
 		blame:          make(map[common.Address]struct{}),
 	}
@@ -66,8 +56,9 @@ type core struct {
 	logger        log.Logger
 	progressTimer *e2c.ProgressTimer
 
-	queuedBlocks map[common.Hash]*proposal
-	blame        map[common.Address]struct{}
+	blockQueue *blockQueue
+	//queuedBlocks map[common.Hash]*proposal
+	blame map[common.Address]struct{}
 
 	expectedHeight *big.Int
 	backend        e2c.Backend
@@ -93,7 +84,7 @@ func (c *core) Stop() error {
 }
 
 func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
-	b, ok := c.queuedBlocks[hash]
+	b, ok := c.blockQueue.get(hash)
 	if ok && b.status != REQUESTED {
 		return b.block.Header(), nil
 	}
@@ -132,19 +123,12 @@ func (c *core) commit(block *types.Block) {
 		return
 	}
 	c.backend.Commit(block)
-	// we delete after 500 milliseconds to stop the bug of next block arriving after we delete,
-	// but before fetcher had time to add to the chain
-	time.AfterFunc(500*time.Millisecond, func() {
-		delete(c.queuedBlocks, block.Hash())
-	})
 	c.logger.Info("Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())
 }
 
 // @todo add a timeout feature!
 func (c *core) requestBlock(hash common.Hash, addr common.Address) {
-	c.queuedBlocks[hash] = &proposal{
-		status: REQUESTED,
-	}
+	c.blockQueue.addRequest(hash)
 	go c.backend.RequestBlock(hash, addr)
 }
 

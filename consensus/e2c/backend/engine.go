@@ -110,10 +110,10 @@ func (b *backend) verifyHeader(chain consensus.ChainHeaderReader, header *types.
 	}
 
 	// Don't waste time checking blocks from the future (adjusting for allowed threshold)
-	if header.Time > uint64(now().Unix()) {
+	adjustedTimeNow := now().Add(time.Duration(b.config.AllowedFutureBlockTime) * time.Second).Unix()
+	if header.Time > uint64(adjustedTimeNow) {
 		return consensus.ErrFutureBlock
 	}
-
 	// Ensure that the extra data format is satisfied
 	if _, err := types.ExtractE2CExtra(header); err != nil {
 		return errInvalidExtraDataFormat
@@ -335,12 +335,12 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		return consensus.ErrUnknownAncestor
 	}
 	var err error
-	if number < 20 {
-		block, err = b.updateBlock(parent, block)
-		if err != nil {
-			return err
-		}
+	//if number < 20 {
+	block, err = b.updateBlock(parent, block)
+	if err != nil {
+		return err
 	}
+	//}
 
 	delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
 
@@ -349,10 +349,10 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	// if err = b.SendNewBlock(block); err != nil {
 	// return err
 	// }
-	// fmt.Println("Successfully sealed block", block.Number().String(), "with", len(block.Transactions()), "transactions.")
+	// b.logger.Info("E2C Engine successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
 	// return nil
 	go func() {
-		//		wait for the timestamp of header, use this to adjust the block period
+		//					wait for the timestamp of header, use this to adjust the block period
 		select {
 		case <-time.After(delay):
 			results <- block

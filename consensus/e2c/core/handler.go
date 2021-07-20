@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 func (c *core) loop() {
@@ -43,12 +44,7 @@ func (c *core) loop() {
 
 			switch ev := event.Data.(type) {
 			case e2c.NewBlockEvent:
-				if _, ok := c.queuedBlocks[ev.Block.Hash()]; !ok {
-					c.queuedBlocks[ev.Block.Hash()] = &proposal{
-						block: ev.Block,
-					}
-				}
-				c.handleBlock(c.queuedBlocks[ev.Block.Hash()])
+				c.handleBlock(ev.Block)
 			case e2c.RelayBlockEvent:
 				c.handleRelay(ev.Hash, ev.Address)
 			case e2c.BlameEvent:
@@ -56,9 +52,12 @@ func (c *core) loop() {
 			case e2c.RequestBlockEvent:
 				c.handleRequest(ev.Hash, ev.Address)
 			case e2c.RespondToRequestEvent:
-				p := c.queuedBlocks[ev.Block.Hash()]
-				p.block = ev.Block
-				c.handleResponse(p)
+				c.handleResponse(ev.Block)
+			}
+
+		case <-c.blockQueue.c():
+			if p, ok := c.blockQueue.getNext(); ok {
+				c.commit(p.block)
 			}
 
 		case <-c.progressTimer.Chan():
@@ -70,16 +69,16 @@ func (c *core) loop() {
 	}
 }
 
-func (c *core) handleBlock(p *proposal) error {
+func (c *core) handleBlock(block *types.Block) error {
 
-	if err := c.verify(p.block); err != nil {
+	if err := c.verify(block); err != nil {
 		if err == consensus.ErrUnknownAncestor {
 
 			// @todo if expected block is n and what we got is k > n+1, we request 1 at a time. Fix this to request all at once
 
-			p.status = UNHANDLED
-			c.requestBlock(p.block.ParentHash(), common.Address{})
-			c.logger.Debug("Requesting missing block", "hash", p.block.Hash())
+			c.blockQueue.addUnhandled(block)
+			c.requestBlock(block.ParentHash(), common.Address{})
+			c.logger.Debug("Requesting missing block", "hash", block.Hash())
 			return nil
 		} else {
 			c.sendBlame()
@@ -87,14 +86,15 @@ func (c *core) handleBlock(p *proposal) error {
 		}
 	}
 
-	c.logger.Info("Valid block received", "number", p.block.Number().Uint64(), "hash", p.block.Hash())
+	c.logger.Info("Valid block received", "number", block.Number().Uint64(), "hash", block.Hash())
 	c.progressTimer.AddDuration(2 * c.config.Delta * time.Millisecond)
-	c.backend.RelayBlock(p.block.Hash())
+	c.backend.RelayBlock(block.Hash())
 
-	time.AfterFunc(2*c.config.Delta*time.Millisecond, func() {
-		c.commit(p.block)
+	c.blockQueue.insert(&proposal{
+		block:  block,
+		status: HANDLED,
+		time:   time.Now(),
 	})
-	p.status = HANDLED
 
 	c.expectedHeight.Add(c.expectedHeight, big.NewInt(1))
 	return nil
@@ -107,7 +107,7 @@ func (c *core) handleRelay(hash common.Hash, addr common.Address) error {
 	if _, err := c.backend.GetBlockFromChain(hash); err == nil {
 		return nil
 	}
-	if _, ok := c.queuedBlocks[hash]; ok {
+	if _, ok := c.blockQueue.get(hash); ok {
 		return nil
 	}
 
@@ -134,7 +134,7 @@ func (c *core) handleRequest(hash common.Hash, addr common.Address) error {
 	c.logger.Debug("Request Received", "hash", hash, "address", addr)
 	block, err := c.backend.GetBlockFromChain(hash)
 	if err != nil {
-		p, ok := c.queuedBlocks[hash]
+		p, ok := c.blockQueue.get(hash)
 		if !ok || p.status != HANDLED {
 			c.logger.Debug("Don't have requested block", "hash", hash, "address", addr)
 			return errors.New("don't have requested block")
@@ -146,19 +146,18 @@ func (c *core) handleRequest(hash common.Hash, addr common.Address) error {
 	return nil
 }
 
-func (c *core) handleResponse(p *proposal) error {
+func (c *core) handleResponse(block *types.Block) error {
 
-	c.logger.Debug("Response to request received", "number", p.block.Number().Uint64(), "hash", p.block.Hash())
+	c.logger.Debug("Response to request received", "number", block.Number().Uint64(), "hash", block.Hash())
 
-	p.status = UNHANDLED
-	if err := c.handleBlock(p); err != nil {
+	if err := c.handleBlock(block); err != nil {
 		return err
 	}
 
-	for _, unhandled := range c.queuedBlocks {
-		if unhandled.status == UNHANDLED && unhandled.block.ParentHash() == p.block.Hash() {
+	for _, unhandled := range c.blockQueue.unhandled {
+		if unhandled.ParentHash() == block.Hash() {
 			c.handleBlock(unhandled)
-			p = unhandled
+			block = unhandled
 		}
 	}
 	return nil

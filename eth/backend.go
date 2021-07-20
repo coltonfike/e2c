@@ -312,15 +312,10 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 	}
 	//@todo fix this
 	if chainConfig.E2C != nil {
-		if chainConfig.E2C.Period != 0 {
-			config.E2C.Period = chainConfig.E2C.Period
-		}
-		if chainConfig.E2C.Delta != 0 {
-			config.E2C.Delta = chainConfig.E2C.Delta
-		}
-		if chainConfig.E2C.F != 0 {
-			config.E2C.F = chainConfig.E2C.F
-		}
+		config.E2C.Period = chainConfig.E2C.Period
+		config.E2C.Delta = chainConfig.E2C.Delta
+		config.E2C.F = chainConfig.E2C.F
+		config.Istanbul.AllowedFutureBlockTime = config.Miner.AllowedFutureBlockTime //Quorum
 
 		return e2cBackend.New(&config.E2C, stack.GetNodeKey(), db)
 	}

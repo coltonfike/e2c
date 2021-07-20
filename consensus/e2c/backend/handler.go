@@ -162,9 +162,7 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		if b.clientBlocks[request.Block.Hash()] >= b.config.F {
 			b.Commit(request.Block)
 
-			time.AfterFunc(3*b.config.Delta*time.Millisecond, func() {
-				delete(b.clientBlocks, request.Block.Hash())
-			})
+			delete(b.clientBlocks, request.Block.ParentHash())
 			fmt.Println("Client committed block", request.Block.Number().String())
 		}
 		return true, nil
