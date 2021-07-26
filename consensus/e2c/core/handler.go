@@ -126,6 +126,10 @@ func (c *core) handleRelay(hash common.Hash, addr common.Address) error {
 
 func (c *core) handleBlame(t time.Time, addr common.Address) error {
 
+	if c.backend.Address() == c.backend.Leader() {
+		return nil
+	}
+
 	if _, ok := c.blame[addr]; !ok {
 		c.blame[addr] = struct{}{}
 	}

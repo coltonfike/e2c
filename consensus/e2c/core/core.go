@@ -114,7 +114,7 @@ func (c *core) verify(block *types.Block) error {
 	}
 	if block.Number().Cmp(c.expectedHeight) != 0 {
 		//@todo add real error here
-		return errors.New("already received block at this height")
+		return errors.New("equivocation detected")
 	}
 	return nil
 }
