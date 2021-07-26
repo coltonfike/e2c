@@ -18,6 +18,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -49,6 +50,8 @@ func (c *core) loop() {
 				c.handleRelay(ev.Hash, ev.Address)
 			case e2c.BlameEvent:
 				c.handleBlame(ev.Time, ev.Address)
+			case e2c.BlameCertificate:
+				c.handleCert(ev.Lock, ev.Committed)
 			case e2c.RequestBlockEvent:
 				c.handleRequest(ev.Hash, ev.Address)
 			case e2c.RespondToRequestEvent:
@@ -98,6 +101,7 @@ func (c *core) handleBlock(block *types.Block) error {
 	c.backend.RelayBlock(block.Hash())
 
 	c.blockQueue.insert(block)
+	c.lock = block
 
 	c.expectedHeight.Add(c.expectedHeight, big.NewInt(1))
 	return nil
@@ -140,6 +144,10 @@ func (c *core) handleBlame(t time.Time, addr common.Address) error {
 		c.backend.ChangeView()
 	}
 	return nil
+}
+
+func (c *core) handleCert(lock *types.Block, committed *types.Block) {
+	fmt.Println("Lock:", lock.Number().String(), "\n", "Committed:", committed.Number().String())
 }
 
 func (c *core) handleRequest(hash common.Hash, addr common.Address) error {

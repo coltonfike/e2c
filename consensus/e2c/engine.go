@@ -69,4 +69,5 @@ type Engine interface {
 	Start(*types.Header) error
 	Stop() error
 	GetQueuedBlock(common.Hash) (*types.Header, error)
+	Lock() *types.Block
 }

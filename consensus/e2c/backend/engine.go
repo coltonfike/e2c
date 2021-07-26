@@ -19,6 +19,7 @@ package backend
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -280,7 +281,7 @@ func (b *backend) Prepare(chain consensus.ChainHeaderReader, header *types.Heade
 	header.Difficulty = defaultDifficulty
 
 	// add address to the extra field
-	extra, err := prepareExtra(header, b.address)
+	extra, err := prepareExtra(header, []common.Address{b.address})
 	if err != nil {
 		return err
 	}
@@ -322,6 +323,8 @@ func (b *backend) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header 
 
 func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 
+	fmt.Println("Validators:", b.validators)
+
 	// update the block header timestamp and signature and propose the block to core engine
 	header := block.Header()
 	number := header.Number.Uint64()
@@ -335,12 +338,12 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		return consensus.ErrUnknownAncestor
 	}
 	var err error
-	//if number < 20 {
-	block, err = b.updateBlock(parent, block)
-	if err != nil {
-		return err
+	if number < 20 {
+		block, err = b.updateBlock(parent, block)
+		if err != nil {
+			return err
+		}
 	}
-	//}
 
 	// delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
 
@@ -411,7 +414,8 @@ func (b *backend) Start(chain consensus.Chain) error {
 	if err != nil {
 		return err
 	}
-	b.leader = e2cExtra.Leader
+	b.validators = e2cExtra.Validators
+	b.leader = b.validators[0]
 
 	if err := b.core.Start(header); err != nil {
 		return err
@@ -466,7 +470,7 @@ func (b *backend) snapshot(chain consensus.ChainHeaderReader, number uint64, has
 			if err != nil {
 				return nil, err
 			}
-			snap = newSnapshot(0, genesis.Hash(), e2cExtra.Leader)
+			snap = newSnapshot(0, genesis.Hash(), e2cExtra.Validators[0])
 			if err := snap.store(b.db); err != nil {
 				return nil, err
 			}
@@ -551,7 +555,7 @@ func ecrecover(header *types.Header) (common.Address, error) {
 }
 
 // prepareExtra returns a extra-data of the given header and validators
-func prepareExtra(header *types.Header, vals common.Address) ([]byte, error) {
+func prepareExtra(header *types.Header, vals []common.Address) ([]byte, error) {
 	var buf bytes.Buffer
 
 	// compensate the lack bytes if header.Extra is not enough E2CExtraVanity bytes.
@@ -561,8 +565,8 @@ func prepareExtra(header *types.Header, vals common.Address) ([]byte, error) {
 	buf.Write(header.Extra[:types.E2CExtraVanity])
 
 	ist := &types.E2CExtra{
-		Leader: vals,
-		Seal:   []byte{},
+		Validators: vals,
+		Seal:       []byte{},
 	}
 
 	payload, err := rlp.EncodeToBytes(&ist)

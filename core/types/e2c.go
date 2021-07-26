@@ -39,14 +39,14 @@ var (
 )
 
 type E2CExtra struct {
-	Leader common.Address
-	Seal   []byte
+	Validators []common.Address
+	Seal       []byte
 }
 
 // EncodeRLP serializes ist into the Ethereum RLP format.
 func (ist *E2CExtra) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, []interface{}{
-		ist.Leader,
+		ist.Validators,
 		ist.Seal,
 	})
 }
@@ -54,13 +54,13 @@ func (ist *E2CExtra) EncodeRLP(w io.Writer) error {
 // DecodeRLP implements rlp.Decoder, and load the istanbul fields from a RLP stream.
 func (ist *E2CExtra) DecodeRLP(s *rlp.Stream) error {
 	var E2CExtra struct {
-		Leader common.Address
-		Seal   []byte
+		Validators []common.Address
+		Seal       []byte
 	}
 	if err := s.Decode(&E2CExtra); err != nil {
 		return err
 	}
-	ist.Leader, ist.Seal = E2CExtra.Leader, E2CExtra.Seal
+	ist.Validators, ist.Seal = E2CExtra.Validators, E2CExtra.Seal
 	return nil
 }
 

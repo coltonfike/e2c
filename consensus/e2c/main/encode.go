@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
-func Encode(vanity string, validators common.Address) (string, error) {
+func Encode(vanity string, validators []common.Address) (string, error) {
 	newVanity, err := hexutil.Decode(vanity)
 	if err != nil {
 		return "", err
@@ -22,8 +22,8 @@ func Encode(vanity string, validators common.Address) (string, error) {
 	newVanity = newVanity[:atypes.E2CExtraVanity]
 
 	ist := &atypes.E2CExtra{
-		Leader: validators,
-		Seal:   make([]byte, atypes.E2CExtraSeal),
+		Validators: validators,
+		Seal:       make([]byte, atypes.E2CExtraSeal),
 	}
 
 	payload, err := rlp.EncodeToBytes(&ist)
@@ -35,6 +35,10 @@ func Encode(vanity string, validators common.Address) (string, error) {
 }
 
 func main() {
-	addr := common.HexToAddress("0x26519ea5fd73518efcf5ca13e6befab6836befce")
+	addr := []common.Address{
+		common.HexToAddress("0x26519ea5fd73518efcf5ca13e6befab6836befce"),
+		common.HexToAddress("0xb7c420caaccc788a5542a54c22b653c525467d8c"),
+		common.HexToAddress("0x25b4c0b45f421e29a1660cfe3bb68511f7cfec26"),
+		common.HexToAddress("0x1c7e5ff787dc181bf5ce7f2eb38d582e0e246350")}
 	fmt.Println(Encode("0x00", addr))
 }

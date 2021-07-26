@@ -17,10 +17,12 @@
 package e2c
 
 import (
+	"io"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 type NewBlockEvent struct {
@@ -43,4 +45,26 @@ type RequestBlockEvent struct {
 
 type RespondToRequestEvent struct {
 	Block *types.Block
+}
+
+type BlameCertificate struct {
+	Lock      *types.Block
+	Committed *types.Block
+}
+
+func (bc *BlameCertificate) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{bc.Lock, bc.Committed})
+}
+
+func (bc *BlameCertificate) DecodeRLP(s *rlp.Stream) error {
+	var cert struct {
+		Lock      *types.Block
+		Committed *types.Block
+	}
+
+	if err := s.Decode(&cert); err != nil {
+		return err
+	}
+	bc.Lock, bc.Committed = cert.Lock, cert.Committed
+	return nil
 }

@@ -68,11 +68,13 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 // ----------------------------------------------------------------------------
 
 type backend struct {
-	config      *e2c.Config
-	eventMux    *event.TypeMux
-	privateKey  *ecdsa.PrivateKey
-	address     common.Address
-	leader      common.Address
+	config     *e2c.Config
+	eventMux   *event.TypeMux
+	privateKey *ecdsa.PrivateKey
+	address    common.Address
+	leader     common.Address
+	// @todo only put this in genesis block?
+	validators  []common.Address
 	core        e2c.Engine
 	logger      log.Logger
 	db          ethdb.Database
@@ -111,6 +113,7 @@ func (b *backend) Broadcast(payload []byte) error {
 	b.knownMessages.Add(hash, true)
 
 	if b.broadcaster != nil {
+		// @todo use the one made by Istanbul rather than this
 		ps := b.broadcaster.PeerSet()
 		b.logger.Trace("E2C Broadcasted a message", "PeerSet", len(ps))
 		for addr, p := range ps {
@@ -182,6 +185,7 @@ func (b *backend) RelayBlock(hash common.Hash) error {
 
 func (b *backend) SendBlame() error {
 
+	// @todo get this to not send the time
 	msg, err := Encode(time.Now())
 	if err != nil {
 		return err
@@ -189,6 +193,28 @@ func (b *backend) SendBlame() error {
 
 	m := &message{
 		Code:    blameMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+
+	payload, err := m.PayloadWithSig(b.Sign)
+	if err != nil {
+		return err
+	}
+
+	go b.Broadcast(payload)
+	return nil
+}
+
+func (b *backend) SendBlameCertificate(bc *e2c.BlameCertificate) error {
+
+	msg, err := Encode(bc)
+	if err != nil {
+		return err
+	}
+
+	m := &message{
+		Code:    blameCertCode,
 		Msg:     msg,
 		Address: b.address,
 	}
@@ -329,6 +355,11 @@ func (b *backend) Verify(block *types.Block) error {
 func (b *backend) ChangeView() {
 	b.leader = common.Address{}
 	b.logger.Info("View change has been triggered")
+	header := b.chain.CurrentHeader()
+	b.SendBlameCertificate(&e2c.BlameCertificate{
+		Lock:      b.core.Lock(),
+		Committed: b.chain.GetBlock(header.Hash(), header.Number.Uint64()),
+	})
 }
 
 func (b *backend) GetBlockFromChain(hash common.Hash) (*types.Block, error) {
@@ -337,6 +368,7 @@ func (b *backend) GetBlockFromChain(hash common.Hash) (*types.Block, error) {
 		// @todo add this as error
 		return nil, errors.New("Chain doesn't have block")
 	}
+	// @todo just call GetBlock!
 	return b.chain.GetBlockByNumber(header.Number.Uint64()), nil
 }
 

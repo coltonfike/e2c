@@ -65,6 +65,7 @@ type core struct {
 	eventMux       *event.TypeMuxSubscription
 
 	handlerWg  *sync.WaitGroup
+	lock       *types.Block
 	viewChange uint32
 }
 
@@ -94,11 +95,16 @@ func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
 	return nil, errors.New("unknown block")
 }
 
+func (c *core) Lock() *types.Block {
+	return c.lock
+}
+
 func (c *core) subscribeEvents() {
 	c.eventMux = c.backend.EventMux().Subscribe(
 		e2c.NewBlockEvent{},
 		e2c.RelayBlockEvent{},
 		e2c.BlameEvent{},
+		e2c.BlameCertificate{},
 		e2c.RequestBlockEvent{},
 		e2c.RespondToRequestEvent{},
 	)

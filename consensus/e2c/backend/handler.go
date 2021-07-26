@@ -116,6 +116,14 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			}
 			b.eventMux.Post(e2c.BlameEvent{Time: t, Address: msg.Address})
 
+		case blameCertCode:
+
+			var bc e2c.BlameCertificate
+			if err := msg.Decode(&bc); err != nil {
+				return true, err
+			}
+			b.eventMux.Post(bc)
+
 		case requestBlockMsgCode:
 
 			var request common.Hash
