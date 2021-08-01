@@ -98,6 +98,7 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			if err := msg.Decode(&block); err != nil {
 				return true, err
 			}
+			fmt.Println("Got new message. Block:", block.Number())
 			b.eventMux.Post(e2c.NewBlockEvent{Block: block})
 
 		case relayMsgCode:

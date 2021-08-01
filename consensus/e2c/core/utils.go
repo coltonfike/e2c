@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -22,6 +23,7 @@ type blockQueue struct {
 	queue        map[common.Hash]*proposal
 	requestQueue map[common.Hash]struct{}
 	unhandled    map[common.Hash]*types.Block
+	parent       map[common.Hash]*types.Block
 	nextBlock    common.Hash
 	lastBlock    common.Hash
 	timer        *time.Timer
@@ -34,6 +36,7 @@ func NewBlockQueue(delta time.Duration) *blockQueue {
 		queue:        make(map[common.Hash]*proposal),
 		requestQueue: make(map[common.Hash]struct{}),
 		unhandled:    make(map[common.Hash]*types.Block),
+		parent:       make(map[common.Hash]*types.Block),
 		delta:        delta,
 		timer:        time.NewTimer(time.Millisecond),
 		size:         0,
@@ -54,7 +57,9 @@ func (bq *blockQueue) deleteUnhandled(hash common.Hash) {
 }
 
 func (bq *blockQueue) addUnhandled(block *types.Block) {
+	fmt.Println("Added Unhandled:", block.Number())
 	bq.unhandled[block.Hash()] = block
+	bq.parent[block.ParentHash()] = block
 }
 
 func (bq *blockQueue) insert(block *types.Block) {

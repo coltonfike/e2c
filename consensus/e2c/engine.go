@@ -66,7 +66,7 @@ type Backend interface {
 }
 
 type Engine interface {
-	Start(*types.Header) error
+	Start(*types.Block) error
 	Stop() error
 	GetQueuedBlock(common.Hash) (*types.Header, error)
 	Lock() *types.Block

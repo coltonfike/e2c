@@ -230,7 +230,7 @@ func (b *backend) SendBlameCertificate(bc *e2c.BlameCertificate) error {
 
 func (b *backend) RequestBlock(hash common.Hash, addr common.Address) error {
 
-	b.logger.Debug("Requesting block", "hash", hash, "addr", addr)
+	b.logger.Info("Requesting block", "hash", hash, "addr", addr)
 	msg, err := Encode(hash)
 	if err != nil {
 		return err

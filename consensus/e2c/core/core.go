@@ -18,6 +18,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -69,8 +70,9 @@ type core struct {
 	viewChange uint32
 }
 
-func (c *core) Start(header *types.Header) error {
-	c.expectedHeight.Add(header.Number, big.NewInt(1))
+func (c *core) Start(block *types.Block) error {
+	c.lock = block
+	fmt.Println("Expected Height:", c.lock.Number())
 	c.progressTimer = e2c.NewProgressTimer(4 * c.config.Delta * time.Millisecond)
 	c.subscribeEvents()
 	atomic.StoreUint32(&c.viewChange, 0)
@@ -118,8 +120,9 @@ func (c *core) verify(block *types.Block) error {
 	if err := c.backend.Verify(block); err != nil {
 		return err
 	}
-	if block.Number().Cmp(c.expectedHeight) != 0 {
+	if block.Number().Uint64() != (c.lock.Number().Uint64() + 1) {
 		//@todo add real error here
+		fmt.Println("Number:", block.Number(), "Expected:", c.lock.Number().Uint64()+1)
 		return errors.New("equivocation detected")
 	}
 	return nil

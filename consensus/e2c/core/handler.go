@@ -85,10 +85,10 @@ func (c *core) handleBlock(block *types.Block) error {
 
 			c.blockQueue.addUnhandled(block)
 			c.requestBlock(block.ParentHash(), common.Address{})
-			c.logger.Debug("Requesting missing block", "hash", block.Hash())
-			return nil
+			c.logger.Info("Requesting missing block", "hash", block.ParentHash())
+			return errors.New("Requesting")
 		} else {
-			c.logger.Warn("Sending Blame", "err", err)
+			c.logger.Warn("Sending Blame", "err", err, "number", block.Number())
 			c.sendBlame()
 			return err
 		}
@@ -173,18 +173,20 @@ func (c *core) handleResponse(block *types.Block) error {
 		return nil
 	}
 
-	c.logger.Debug("Response to request received", "number", block.Number().Uint64(), "hash", block.Hash())
+	c.logger.Info("Response to request received", "number", block.Number().Uint64(), "hash", block.Hash())
 
 	if err := c.handleBlock(block); err != nil {
 		return err
 	}
 	delete(c.blockQueue.requestQueue, block.Hash())
 
-	for _, unhandled := range c.blockQueue.unhandled {
-		if unhandled.ParentHash() == block.Hash() {
-			c.handleBlock(unhandled)
-			delete(c.blockQueue.unhandled, unhandled.Hash())
-			block = unhandled
+	for {
+		if b, ok := c.blockQueue.parent[block.Hash()]; ok {
+			c.handleBlock(b)
+			block = b
+			delete(c.blockQueue.parent, b.ParentHash())
+		} else {
+			break
 		}
 	}
 	return nil

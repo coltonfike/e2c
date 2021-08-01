@@ -19,7 +19,6 @@ package backend
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -323,8 +322,6 @@ func (b *backend) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header 
 
 func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 
-	fmt.Println("Validators:", b.validators)
-
 	// update the block header timestamp and signature and propose the block to core engine
 	header := block.Header()
 	number := header.Number.Uint64()
@@ -338,12 +335,12 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		return consensus.ErrUnknownAncestor
 	}
 	var err error
-	if number < 20 {
-		block, err = b.updateBlock(parent, block)
-		if err != nil {
-			return err
-		}
+	//if number < 20 {
+	block, err = b.updateBlock(parent, block)
+	if err != nil {
+		return err
 	}
+	//}
 
 	// delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
 
@@ -415,9 +412,10 @@ func (b *backend) Start(chain consensus.Chain) error {
 		return err
 	}
 	b.validators = e2cExtra.Validators
+	// @todo fix this to be the leader of block rather than always 0
 	b.leader = b.validators[0]
 
-	if err := b.core.Start(header); err != nil {
+	if err := b.core.Start(chain.GetBlock(header.Hash(), header.Number.Uint64())); err != nil {
 		return err
 	}
 
