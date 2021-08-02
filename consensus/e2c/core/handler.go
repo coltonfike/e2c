@@ -19,7 +19,6 @@ package core
 import (
 	"errors"
 	"fmt"
-	"math/big"
 	"sync/atomic"
 	"time"
 
@@ -59,6 +58,7 @@ func (c *core) loop() {
 			}
 
 		case <-c.blockQueue.c():
+			// @todo on view change, pause this
 			if block, ok := c.blockQueue.getNext(); ok {
 				c.commit(block)
 			}
@@ -83,7 +83,7 @@ func (c *core) handleBlock(block *types.Block) error {
 
 			// @todo if expected block is n and what we got is k > n+1, we request 1 at a time. Fix this to request all at once
 
-			c.blockQueue.addUnhandled(block)
+			c.blockQueue.insertUnhandled(block)
 			c.requestBlock(block.ParentHash(), common.Address{})
 			c.logger.Info("Requesting missing block", "hash", block.ParentHash())
 			return errors.New("Requesting")
@@ -94,16 +94,13 @@ func (c *core) handleBlock(block *types.Block) error {
 		}
 	}
 
-	delete(c.blockQueue.requestQueue, block.Hash())
-	delete(c.blockQueue.unhandled, block.Hash())
 	c.logger.Info("Valid block received", "number", block.Number().Uint64(), "hash", block.Hash())
 	c.progressTimer.AddDuration(2 * c.config.Delta * time.Millisecond)
 	c.backend.RelayBlock(block.Hash())
 
-	c.blockQueue.insert(block)
+	c.blockQueue.insertHandled(block)
 	c.lock = block
 
-	c.expectedHeight.Add(c.expectedHeight, big.NewInt(1))
 	return nil
 }
 
@@ -114,13 +111,7 @@ func (c *core) handleRelay(hash common.Hash, addr common.Address) error {
 	if _, err := c.backend.GetBlockFromChain(hash); err == nil {
 		return nil
 	}
-	if _, ok := c.blockQueue.get(hash); ok {
-		return nil
-	}
-	if _, ok := c.blockQueue.unhandled[hash]; ok {
-		return nil
-	}
-	if _, ok := c.blockQueue.requestQueue[hash]; ok {
+	if c.blockQueue.contains(hash) || c.blockQueue.hasRequest(hash) {
 		return nil
 	}
 
@@ -169,7 +160,7 @@ func (c *core) handleRequest(hash common.Hash, addr common.Address) error {
 
 func (c *core) handleResponse(block *types.Block) error {
 
-	if _, ok := c.blockQueue.requestQueue[block.Hash()]; !ok {
+	if !c.blockQueue.hasRequest(block.Hash()) {
 		return nil
 	}
 
@@ -181,10 +172,11 @@ func (c *core) handleResponse(block *types.Block) error {
 	delete(c.blockQueue.requestQueue, block.Hash())
 
 	for {
-		if b, ok := c.blockQueue.parent[block.Hash()]; ok {
-			c.handleBlock(b)
-			block = b
-			delete(c.blockQueue.parent, b.ParentHash())
+		if child, ok := c.blockQueue.getChild(block.Hash()); ok {
+			if err := c.handleBlock(child); err != nil {
+				return err
+			}
+			block = child
 		} else {
 			break
 		}

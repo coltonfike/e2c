@@ -1,7 +1,6 @@
 package core
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -44,7 +43,7 @@ func NewBlockQueue(delta time.Duration) *blockQueue {
 	return bq
 }
 
-func (bq *blockQueue) addRequest(hash common.Hash) {
+func (bq *blockQueue) insertRequest(hash common.Hash) {
 	bq.requestQueue[hash] = struct{}{}
 }
 
@@ -56,13 +55,14 @@ func (bq *blockQueue) deleteUnhandled(hash common.Hash) {
 	delete(bq.unhandled, hash)
 }
 
-func (bq *blockQueue) addUnhandled(block *types.Block) {
-	fmt.Println("Added Unhandled:", block.Number())
+func (bq *blockQueue) insertUnhandled(block *types.Block) {
 	bq.unhandled[block.Hash()] = block
 	bq.parent[block.ParentHash()] = block
 }
 
-func (bq *blockQueue) insert(block *types.Block) {
+func (bq *blockQueue) insertHandled(block *types.Block) {
+	delete(bq.unhandled, block.Hash())
+	delete(bq.requestQueue, block.Hash())
 	if bq.size == 0 {
 		bq.timer.Reset(2 * bq.delta * time.Millisecond)
 		bq.nextBlock = block.Hash()
@@ -79,8 +79,18 @@ func (bq *blockQueue) get(hash common.Hash) (*types.Block, bool) {
 	if !ok {
 		return nil, ok
 	}
-	//fmt.Println("ok", ok, "Hash:", hash, "bq.last:", bq.lastBlock, "bq.next:", bq.nextBlock)
 	return p.block, ok
+}
+
+func (bq *blockQueue) contains(hash common.Hash) bool {
+	_, ok := bq.queue[hash]
+	_, unhandledOk := bq.unhandled[hash]
+	return ok || unhandledOk
+}
+
+func (bq *blockQueue) hasRequest(hash common.Hash) bool {
+	_, ok := bq.requestQueue[hash]
+	return ok
 }
 
 func (bq *blockQueue) delete(hash common.Hash) {
@@ -115,10 +125,14 @@ func (bq *blockQueue) getNext() (*types.Block, bool) {
 	}
 	bq.delete(bq.lastBlock)
 	p, _ := bq.get(bq.nextBlock)
-	//fmt.Println(p)
 	bq.lastBlock = bq.nextBlock
 	bq.resetTimer()
 	bq.size--
-	//fmt.Println(p)
 	return p, true
+}
+
+func (bq *blockQueue) getChild(hash common.Hash) (*types.Block, bool) {
+	child, ok := bq.parent[hash]
+	delete(bq.parent, hash)
+	return child, ok
 }

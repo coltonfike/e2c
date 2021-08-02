@@ -72,7 +72,6 @@ type core struct {
 
 func (c *core) Start(block *types.Block) error {
 	c.lock = block
-	fmt.Println("Expected Height:", c.lock.Number())
 	c.progressTimer = e2c.NewProgressTimer(4 * c.config.Delta * time.Millisecond)
 	c.subscribeEvents()
 	atomic.StoreUint32(&c.viewChange, 0)
@@ -140,12 +139,13 @@ func (c *core) commit(block *types.Block) {
 
 // @todo add a timeout feature!
 func (c *core) requestBlock(hash common.Hash, addr common.Address) {
-	c.blockQueue.addRequest(hash)
+	c.blockQueue.insertRequest(hash)
 	go c.backend.RequestBlock(hash, addr)
 }
 
 func (c *core) sendBlame() {
 	c.blame[c.backend.Address()] = struct{}{}
+	// @todo race condition here
 	time.AfterFunc(2*c.config.Delta*time.Millisecond, func() {
 		delete(c.blame, c.backend.Address())
 	})
