@@ -335,12 +335,12 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		return consensus.ErrUnknownAncestor
 	}
 	var err error
-	//if number < 20 {
-	block, err = b.updateBlock(parent, block)
-	if err != nil {
-		return err
+	if number < 20 {
+		block, err = b.updateBlock(parent, block)
+		if err != nil {
+			return err
+		}
 	}
-	//}
 
 	// delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
 

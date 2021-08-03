@@ -49,8 +49,10 @@ func (c *core) loop() {
 				c.handleRelay(ev.Hash, ev.Address)
 			case e2c.BlameEvent:
 				c.handleBlame(ev.Time, ev.Address)
-			case e2c.BlameCertificate:
-				c.handleCert(ev.Lock, ev.Committed)
+			case e2c.BlameCertificateEvent:
+				c.handleCert(ev.Lock, ev.Committed, ev.Address)
+			case e2c.Vote:
+				c.handleVote(ev.Block, ev.Address)
 			case e2c.RequestBlockEvent:
 				c.handleRequest(ev.Hash, ev.Address)
 			case e2c.RespondToRequestEvent:
@@ -133,12 +135,27 @@ func (c *core) handleBlame(t time.Time, addr common.Address) error {
 	if uint64(len(c.blame)) >= c.config.F {
 		atomic.StoreUint32(&c.viewChange, 1)
 		c.backend.ChangeView()
+		if c.backend.Address() != c.backend.Leader() {
+			c.backend.SendBlameCertificate(e2c.BlameCertificate{Lock: c.lock, Committed: c.committed})
+		}
 	}
 	return nil
 }
 
-func (c *core) handleCert(lock *types.Block, committed *types.Block) {
-	fmt.Println("Lock:", lock.Number().String(), "\n", "Committed:", committed.Number().String())
+func (c *core) handleCert(lock *types.Block, committed *types.Block, addr common.Address) {
+	fmt.Println("Handling Cert!")
+	if committed.Number().Uint64() >= c.committed.Number().Uint64() && committed.Number().Uint64() <= c.lock.Number().Uint64() {
+		fmt.Println("Sent vote")
+		c.backend.SendVote(committed, addr)
+	}
+	if lock.Number().Uint64() >= c.committed.Number().Uint64() && lock.Number().Uint64() <= c.lock.Number().Uint64() {
+		fmt.Println("Sent vote")
+		c.backend.SendVote(lock, addr)
+	}
+}
+
+func (c *core) handleVote(block *types.Block, addr common.Address) {
+	fmt.Println("Vote received!!")
 }
 
 func (c *core) handleRequest(hash common.Hash, addr common.Address) error {

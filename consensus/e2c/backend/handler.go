@@ -123,7 +123,14 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			if err := msg.Decode(&bc); err != nil {
 				return true, err
 			}
-			b.eventMux.Post(bc)
+			b.eventMux.Post(e2c.BlameCertificateEvent{Lock: bc.Lock, Committed: bc.Committed, Address: msg.Address})
+
+		case voteMsgCode:
+			var block *types.Block
+			if err := msg.Decode(&block); err != nil {
+				return true, err
+			}
+			b.eventMux.Post(e2c.Vote{Block: block, Address: msg.Address})
 
 		case requestBlockMsgCode:
 

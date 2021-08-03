@@ -44,6 +44,8 @@ type Backend interface {
 
 	// Sends blame message to all peers
 	SendBlame() error
+	SendVote(*types.Block, common.Address) error
+	SendBlameCertificate(BlameCertificate) error
 
 	// Requests a block from peers
 	RequestBlock(common.Hash, common.Address) error

@@ -47,6 +47,17 @@ type RespondToRequestEvent struct {
 	Block *types.Block
 }
 
+type Vote struct {
+	Block   *types.Block
+	Address common.Address
+}
+
+type BlameCertificateEvent struct {
+	Lock      *types.Block
+	Committed *types.Block
+	Address   common.Address
+}
+
 type BlameCertificate struct {
 	Lock      *types.Block
 	Committed *types.Block

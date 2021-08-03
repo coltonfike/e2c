@@ -31,6 +31,7 @@ const (
 	relayMsgCode
 	blameMsgCode
 	blameCertCode
+	voteMsgCode
 	requestBlockMsgCode
 	respondToRequestMsgCode
 )

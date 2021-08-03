@@ -67,6 +67,7 @@ type core struct {
 
 	handlerWg  *sync.WaitGroup
 	lock       *types.Block
+	committed  *types.Block
 	viewChange uint32
 }
 
@@ -105,7 +106,8 @@ func (c *core) subscribeEvents() {
 		e2c.NewBlockEvent{},
 		e2c.RelayBlockEvent{},
 		e2c.BlameEvent{},
-		e2c.BlameCertificate{},
+		e2c.BlameCertificateEvent{},
+		e2c.Vote{},
 		e2c.RequestBlockEvent{},
 		e2c.RespondToRequestEvent{},
 	)
@@ -134,6 +136,7 @@ func (c *core) commit(block *types.Block) {
 		return
 	}
 	c.backend.Commit(block)
+	c.committed = block
 	c.logger.Info("Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())
 }
 

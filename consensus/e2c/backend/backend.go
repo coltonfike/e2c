@@ -206,9 +206,9 @@ func (b *backend) SendBlame() error {
 	return nil
 }
 
-func (b *backend) SendBlameCertificate(bc *e2c.BlameCertificate) error {
+func (b *backend) SendBlameCertificate(bc e2c.BlameCertificate) error {
 
-	msg, err := Encode(bc)
+	msg, err := Encode(&bc)
 	if err != nil {
 		return err
 	}
@@ -225,6 +225,48 @@ func (b *backend) SendBlameCertificate(bc *e2c.BlameCertificate) error {
 	}
 
 	go b.Broadcast(payload)
+	return nil
+}
+
+func (b *backend) SendVote(block *types.Block, addr common.Address) error {
+
+	msg, err := Encode(block)
+	if err != nil {
+		return err
+	}
+
+	m := &message{
+		Code:    voteMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+
+	payload, err := m.PayloadWithSig(b.Sign)
+	if err != nil {
+		return err
+	}
+
+	hash := e2c.RLPHash(payload)
+	ps := b.broadcaster.PeerSet()
+	p, ok := ps[addr]
+	if !ok {
+		return errors.New("No peer with that address")
+	}
+	ms, ok := b.recentMessages.Get(addr)
+	var c *lru.ARCCache
+	if ok {
+		c, _ = ms.(*lru.ARCCache)
+		if _, k := c.Get(hash); k {
+			// This peer had this event, skip it
+			return nil
+		}
+	} else {
+		c, _ = lru.NewARC(inmemoryMessages)
+	}
+
+	c.Add(hash, true)
+	b.recentMessages.Add(addr, c)
+	go p.SendConsensus(e2cMsg, payload)
 	return nil
 }
 
@@ -355,11 +397,13 @@ func (b *backend) Verify(block *types.Block) error {
 func (b *backend) ChangeView() {
 	b.leader = common.Address{}
 	b.logger.Info("View change has been triggered")
-	header := b.chain.CurrentHeader()
-	b.SendBlameCertificate(&e2c.BlameCertificate{
-		Lock:      b.core.Lock(),
-		Committed: b.chain.GetBlock(header.Hash(), header.Number.Uint64()),
-	})
+	/*
+		header := b.chain.CurrentHeader()
+		b.SendBlameCertificate(&e2c.BlameCertificate{
+			Lock:      b.core.Lock(),
+			Committed: b.chain.GetBlock(header.Hash(), header.Number.Uint64()),
+		})
+	*/
 }
 
 func (b *backend) GetBlockFromChain(hash common.Hash) (*types.Block, error) {
