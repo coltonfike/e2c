@@ -51,18 +51,28 @@ func (c *core) loop() {
 				c.handleBlame(ev.Time, ev.Address)
 			case e2c.BlameCertificateEvent:
 				c.handleCert(ev.Lock, ev.Committed, ev.Address)
+			case e2c.BlockCertificateEvent:
+				c.handleBlockCert(ev.Block)
 			case e2c.Vote:
 				c.handleVote(ev.Block, ev.Address)
 			case e2c.RequestBlockEvent:
 				c.handleRequest(ev.Hash, ev.Address)
 			case e2c.RespondToRequestEvent:
 				c.handleResponse(ev.Block)
+			case e2c.ValidateEvent:
+				c.handleValidate(ev.Address)
+
+			case e2c.B1:
+				c.handleB1(ev)
+			case e2c.B2:
+				c.handleB2(ev)
 			}
 
 		case <-c.blockQueue.c():
-			// @todo on view change, pause this
-			if block, ok := c.blockQueue.getNext(); ok {
-				c.commit(block)
+			if c.backend.Status() != 1 {
+				if block, ok := c.blockQueue.getNext(); ok {
+					c.commit(block)
+				}
 			}
 
 		case <-c.progressTimer.Chan():
@@ -75,6 +85,9 @@ func (c *core) loop() {
 }
 
 func (c *core) handleBlock(block *types.Block) error {
+	if c.backend.Status() == 1 {
+		return nil
+	}
 
 	if _, ok := c.blockQueue.get(block.Hash()); ok {
 		return nil
@@ -136,6 +149,8 @@ func (c *core) handleBlame(t time.Time, addr common.Address) error {
 		atomic.StoreUint32(&c.viewChange, 1)
 		c.backend.ChangeView()
 		if c.backend.Address() != c.backend.Leader() {
+			c.vote[c.lock.Hash()] = 1
+			c.vote[c.committed.Hash()] = 1
 			c.backend.SendBlameCertificate(e2c.BlameCertificate{Lock: c.lock, Committed: c.committed})
 		}
 	}
@@ -155,7 +170,53 @@ func (c *core) handleCert(lock *types.Block, committed *types.Block, addr common
 }
 
 func (c *core) handleVote(block *types.Block, addr common.Address) {
+	c.vote[block.Hash()]++
 	fmt.Println("Vote received!!")
+	if c.vote[block.Hash()] > c.config.F {
+		if c.highestCert == nil {
+			c.highestCert = block
+			fmt.Println("Block", block.Number().Uint64(), "certified. Sending certificate to new leader!")
+			c.backend.SendBlockCert(c.highestCert)
+		} else if c.highestCert.Number().Uint64() < block.Number().Uint64() {
+			c.highestCert = block
+			fmt.Println("Block", block.Number().Uint64(), "certified. Sending certificate to new leader!")
+			c.backend.SendBlockCert(c.highestCert)
+		}
+	}
+}
+
+func (c *core) handleBlockCert(block *types.Block) {
+	c.certReceived++
+	fmt.Println("BlockCert Received")
+	if c.highestCert == nil {
+		c.highestCert = block
+	} else if c.highestCert.Number().Uint64() < block.Number().Uint64() {
+		c.highestCert = block
+	}
+
+	// @todo change this to a timer?
+	if uint64(c.certReceived) >= 4 {
+		fmt.Println("Highest is", c.highestCert.Number())
+
+		for {
+			block, ok := c.blockQueue.getNext()
+			if !ok {
+				break
+			}
+			fmt.Println(block.Number())
+
+			if block.Number().Uint64() <= c.highestCert.Number().Uint64() {
+				c.commit(block)
+			}
+		}
+
+		c.backend.SetStatus(2)
+		block := <-c.ch
+		c.backend.SetStatus(3)
+		fmt.Println("Block", block.Number())
+		c.blockQueue.clear()
+		c.backend.SendBlockOne(e2c.B1{Cert: c.highestCert, Block: block})
+	}
 }
 
 func (c *core) handleRequest(hash common.Hash, addr common.Address) error {
@@ -199,4 +260,57 @@ func (c *core) handleResponse(block *types.Block) error {
 		}
 	}
 	return nil
+}
+
+func (c *core) handleB1(b e2c.B1) {
+	if b.Cert.Number().Uint64() < c.highestCert.Number().Uint64() {
+		// @todo also check votes are correct
+		c.backend.SendBlame()
+	}
+	for {
+		block, ok := c.blockQueue.getNext()
+		if !ok {
+			break
+		}
+		fmt.Println(block.Number())
+
+		if block.Number().Uint64() <= c.highestCert.Number().Uint64() {
+			c.commit(block)
+		}
+	}
+	c.blockQueue.clear()
+	if err := c.verify(b.Block); err != nil {
+		c.backend.SendBlame()
+	}
+	c.blockQueue.insertHandled(b.Block)
+	c.lock = b.Block
+	c.backend.SendValidate()
+	c.backend.SetStatus(2)
+	fmt.Println("Check 1 Passed, sending Ack")
+}
+
+func (c *core) handleValidate(addr common.Address) {
+	fmt.Println("Received validate")
+	c.validates[addr] = struct{}{}
+	// @todo replace with F, but can't now because node 1 dies when it's bad
+	if uint64(len(c.validates)) >= 2 {
+		fmt.Println("Trying to read from ch")
+		block := <-c.ch
+		c.backend.SendFinal(e2c.B2{Validates: block, Block: block})
+		fmt.Println("Sent final")
+		c.backend.SetStatus(0)
+	}
+}
+
+func (c *core) handleB2(b e2c.B2) {
+
+	// @todo do error checking here
+
+	fmt.Println("Recieved final block!")
+	if err := c.verify(b.Block); err != nil {
+		c.backend.SendBlame()
+	}
+	c.blockQueue.insertHandled(b.Block)
+	c.lock = b.Block
+	c.backend.SetStatus(0)
 }

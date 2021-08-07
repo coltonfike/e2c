@@ -30,7 +30,11 @@ const (
 	newBlockMsgCode uint64 = iota
 	relayMsgCode
 	blameMsgCode
+	validateMsgCode
 	blameCertCode
+	blockCertMsgCode
+	newBlockOneMsgCode
+	finalBlockMsgCode
 	voteMsgCode
 	requestBlockMsgCode
 	respondToRequestMsgCode

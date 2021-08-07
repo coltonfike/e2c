@@ -98,7 +98,6 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			if err := msg.Decode(&block); err != nil {
 				return true, err
 			}
-			fmt.Println("Got new message. Block:", block.Number())
 			b.eventMux.Post(e2c.NewBlockEvent{Block: block})
 
 		case relayMsgCode:
@@ -117,6 +116,14 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			}
 			b.eventMux.Post(e2c.BlameEvent{Time: t, Address: msg.Address})
 
+		case validateMsgCode:
+
+			var t time.Time
+			if err := msg.Decode(&t); err != nil {
+				return true, err
+			}
+			b.eventMux.Post(e2c.ValidateEvent{Time: t, Address: msg.Address})
+
 		case blameCertCode:
 
 			var bc e2c.BlameCertificate
@@ -131,6 +138,27 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 				return true, err
 			}
 			b.eventMux.Post(e2c.Vote{Block: block, Address: msg.Address})
+
+		case blockCertMsgCode:
+			var block *types.Block
+			if err := msg.Decode(&block); err != nil {
+				return true, err
+			}
+			b.eventMux.Post(e2c.BlockCertificateEvent{Block: block})
+
+		case newBlockOneMsgCode:
+			var block e2c.B1
+			if err := msg.Decode(&block); err != nil {
+				return true, err
+			}
+			b.eventMux.Post(block)
+
+		case finalBlockMsgCode:
+			var block e2c.B2
+			if err := msg.Decode(&block); err != nil {
+				return true, err
+			}
+			b.eventMux.Post(block)
 
 		case requestBlockMsgCode:
 

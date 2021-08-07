@@ -35,16 +35,18 @@ import (
 // solution: delete block when new head event is triggered?
 
 // New creates an E2C consensus core
-func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
+func New(backend e2c.Backend, config *e2c.Config, ch chan *types.Block) e2c.Engine {
 	c := &core{
-		config:    config,
-		handlerWg: new(sync.WaitGroup),
-		logger:    log.New(),
-		backend:   backend,
-		//queuedBlocks:   make(map[common.Hash]*proposal),
+		config:         config,
+		handlerWg:      new(sync.WaitGroup),
+		logger:         log.New(),
+		backend:        backend,
 		blockQueue:     NewBlockQueue(config.Delta),
+		vote:           make(map[common.Hash]uint64),
 		expectedHeight: big.NewInt(0),
+		ch:             ch,
 		blame:          make(map[common.Address]struct{}),
+		validates:      make(map[common.Address]struct{}),
 	}
 
 	return c
@@ -55,20 +57,24 @@ func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
 type core struct {
 	config        *e2c.Config
 	logger        log.Logger
+	ch            chan *types.Block
 	progressTimer *e2c.ProgressTimer
 
 	blockQueue *blockQueue
-	//queuedBlocks map[common.Hash]*proposal
-	blame map[common.Address]struct{}
+	blame      map[common.Address]struct{}
+	validates  map[common.Address]struct{}
+	vote       map[common.Hash]uint64
 
 	expectedHeight *big.Int
 	backend        e2c.Backend
 	eventMux       *event.TypeMuxSubscription
 
-	handlerWg  *sync.WaitGroup
-	lock       *types.Block
-	committed  *types.Block
-	viewChange uint32
+	handlerWg    *sync.WaitGroup
+	lock         *types.Block
+	committed    *types.Block
+	highestCert  *types.Block
+	certReceived uint32
+	viewChange   uint32
 }
 
 func (c *core) Start(block *types.Block) error {
@@ -106,8 +112,12 @@ func (c *core) subscribeEvents() {
 		e2c.NewBlockEvent{},
 		e2c.RelayBlockEvent{},
 		e2c.BlameEvent{},
+		e2c.ValidateEvent{},
 		e2c.BlameCertificateEvent{},
+		e2c.BlockCertificateEvent{},
 		e2c.Vote{},
+		e2c.B1{},
+		e2c.B2{},
 		e2c.RequestBlockEvent{},
 		e2c.RespondToRequestEvent{},
 	)
@@ -131,10 +141,6 @@ func (c *core) verify(block *types.Block) error {
 
 func (c *core) commit(block *types.Block) {
 
-	// we are changing view, do not commit any blocks!
-	if atomic.LoadUint32(&c.viewChange) == 1 {
-		return
-	}
 	c.backend.Commit(block)
 	c.committed = block
 	c.logger.Info("Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())

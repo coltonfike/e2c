@@ -38,6 +38,12 @@ type BlameEvent struct {
 	Time    time.Time
 	Address common.Address
 }
+
+type ValidateEvent struct {
+	Time    time.Time
+	Address common.Address
+}
+
 type RequestBlockEvent struct {
 	Hash    common.Hash
 	Address common.Address
@@ -56,6 +62,10 @@ type BlameCertificateEvent struct {
 	Lock      *types.Block
 	Committed *types.Block
 	Address   common.Address
+}
+
+type BlockCertificateEvent struct {
+	Block *types.Block
 }
 
 type BlameCertificate struct {
@@ -77,5 +87,50 @@ func (bc *BlameCertificate) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	bc.Lock, bc.Committed = cert.Lock, cert.Committed
+	return nil
+}
+
+type B1 struct {
+	Cert  *types.Block
+	Block *types.Block
+}
+
+func (b *B1) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{b.Cert, b.Block})
+}
+
+func (b *B1) DecodeRLP(s *rlp.Stream) error {
+	var cert struct {
+		Cert  *types.Block
+		Block *types.Block
+	}
+
+	if err := s.Decode(&cert); err != nil {
+		return err
+	}
+	b.Cert, b.Block = cert.Cert, cert.Block
+	return nil
+}
+
+type B2 struct {
+	//@todo change this to array of validate messages
+	Validates *types.Block
+	Block     *types.Block
+}
+
+func (b *B2) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{b.Validates, b.Block})
+}
+
+func (b *B2) DecodeRLP(s *rlp.Stream) error {
+	var cert struct {
+		Validates *types.Block
+		Block     *types.Block
+	}
+
+	if err := s.Decode(&cert); err != nil {
+		return err
+	}
+	b.Validates, b.Block = cert.Validates, cert.Block
 	return nil
 }

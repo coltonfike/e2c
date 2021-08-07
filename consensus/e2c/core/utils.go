@@ -136,3 +136,9 @@ func (bq *blockQueue) getChild(hash common.Hash) (*types.Block, bool) {
 	delete(bq.parent, hash)
 	return child, ok
 }
+
+func (bq *blockQueue) clear() {
+	for k := range bq.queue {
+		delete(bq.queue, k)
+	}
+}

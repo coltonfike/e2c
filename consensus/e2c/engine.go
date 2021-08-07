@@ -29,6 +29,8 @@ type Backend interface {
 
 	// Returns the current Leader
 	Leader() common.Address
+	Status() uint32
+	SetStatus(uint32)
 
 	// EventMux returns the event mux in backend
 	EventMux() *event.TypeMux
@@ -38,14 +40,18 @@ type Backend interface {
 
 	// Sends a new block to all peers
 	SendNewBlock(*types.Block) error
+	SendBlockOne(B1) error
+	SendFinal(B2) error
 
 	// Relays a block header to all peers
 	RelayBlock(common.Hash) error
 
 	// Sends blame message to all peers
 	SendBlame() error
+	SendValidate() error
 	SendVote(*types.Block, common.Address) error
 	SendBlameCertificate(BlameCertificate) error
+	SendBlockCert(*types.Block) error
 
 	// Requests a block from peers
 	RequestBlock(common.Hash, common.Address) error

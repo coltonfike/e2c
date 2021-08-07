@@ -19,8 +19,10 @@ package backend
 import (
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -58,10 +60,12 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 		coreStarted:    false,
 		recentMessages: recentMessages,
 		knownMessages:  knownMessages,
+		status:         0,
+		ch:             make(chan *types.Block),
 		// @ todo add a timeout feature for clientBlocks
 		clientBlocks: make(map[common.Hash]uint64),
 	}
-	backend.core = e2cCore.New(backend, backend.config)
+	backend.core = e2cCore.New(backend, backend.config, backend.ch)
 	return backend
 }
 
@@ -81,6 +85,9 @@ type backend struct {
 	chain       consensus.Chain
 	coreStarted bool
 	coreMu      sync.RWMutex
+	status      uint32
+
+	ch chan *types.Block
 
 	// Snapshots for recent block to speed up reorgs
 	recents *lru.ARCCache
@@ -105,6 +112,14 @@ func (b *backend) Address() common.Address {
 // Validators implements e2c.Backend.Validators
 func (b *backend) Leader() common.Address {
 	return b.leader
+}
+
+func (b *backend) Status() uint32 {
+	return atomic.LoadUint32(&b.status)
+}
+
+func (b *backend) SetStatus(val uint32) {
+	atomic.StoreUint32(&b.status, val)
 }
 
 // Broadcast implements e2c.Backend.Gossip
@@ -134,6 +149,56 @@ func (b *backend) Broadcast(payload []byte) error {
 			go p.SendConsensus(e2cMsg, payload)
 		}
 	}
+	return nil
+}
+
+func (b *backend) SendBlockOne(block e2c.B1) error {
+
+	msg, err := Encode(&block)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	m := &message{
+		Code:    newBlockOneMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+
+	payload, err := m.PayloadWithSig(b.Sign)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	fmt.Println("Sending New block one!")
+	go b.Broadcast(payload)
+	return nil
+}
+
+func (b *backend) SendFinal(block e2c.B2) error {
+
+	msg, err := Encode(&block)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	m := &message{
+		Code:    finalBlockMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+
+	payload, err := m.PayloadWithSig(b.Sign)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	fmt.Println("Sending New final block!")
+	go b.Broadcast(payload)
 	return nil
 }
 
@@ -206,6 +271,50 @@ func (b *backend) SendBlame() error {
 	return nil
 }
 
+func (b *backend) SendValidate() error {
+
+	addr := b.Leader()
+	// @todo get this to not send the time
+	msg, err := Encode(time.Now())
+	if err != nil {
+		return err
+	}
+
+	m := &message{
+		Code:    validateMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+
+	payload, err := m.PayloadWithSig(b.Sign)
+	if err != nil {
+		return err
+	}
+
+	hash := e2c.RLPHash(payload)
+	ps := b.broadcaster.PeerSet()
+	p, ok := ps[addr]
+	if !ok {
+		return errors.New("No peer with that address")
+	}
+	ms, ok := b.recentMessages.Get(addr)
+	var c *lru.ARCCache
+	if ok {
+		c, _ = ms.(*lru.ARCCache)
+		if _, k := c.Get(hash); k {
+			// This peer had this event, skip it
+			return nil
+		}
+	} else {
+		c, _ = lru.NewARC(inmemoryMessages)
+	}
+
+	c.Add(hash, true)
+	b.recentMessages.Add(addr, c)
+	go p.SendConsensus(e2cMsg, payload)
+	return nil
+}
+
 func (b *backend) SendBlameCertificate(bc e2c.BlameCertificate) error {
 
 	msg, err := Encode(&bc)
@@ -270,6 +379,48 @@ func (b *backend) SendVote(block *types.Block, addr common.Address) error {
 	return nil
 }
 
+func (b *backend) SendBlockCert(block *types.Block) error {
+	addr := b.validators[1]
+	msg, err := Encode(block)
+	if err != nil {
+		return err
+	}
+
+	m := &message{
+		Code:    blockCertMsgCode,
+		Msg:     msg,
+		Address: b.address,
+	}
+
+	payload, err := m.PayloadWithSig(b.Sign)
+	if err != nil {
+		return err
+	}
+
+	hash := e2c.RLPHash(payload)
+	ps := b.broadcaster.PeerSet()
+	p, ok := ps[addr]
+	if !ok {
+		return errors.New("No peer with that address")
+	}
+	ms, ok := b.recentMessages.Get(addr)
+	var c *lru.ARCCache
+	if ok {
+		c, _ = ms.(*lru.ARCCache)
+		if _, k := c.Get(hash); k {
+			// This peer had this event, skip it
+			return nil
+		}
+	} else {
+		c, _ = lru.NewARC(inmemoryMessages)
+	}
+
+	c.Add(hash, true)
+	b.recentMessages.Add(addr, c)
+	go p.SendConsensus(e2cMsg, payload)
+	return nil
+}
+
 func (b *backend) RequestBlock(hash common.Hash, addr common.Address) error {
 
 	b.logger.Info("Requesting block", "hash", hash, "addr", addr)
@@ -289,7 +440,7 @@ func (b *backend) RequestBlock(hash common.Hash, addr common.Address) error {
 		return err
 	}
 
-	// they are asking for the block from everyone
+	// they are asking for the block from everyo39Kne
 	if addr == (common.Address{}) {
 		go b.Broadcast(payload)
 	} else { // requesting from a specific address
@@ -395,7 +546,8 @@ func (b *backend) Verify(block *types.Block) error {
 }
 
 func (b *backend) ChangeView() {
-	b.leader = common.Address{}
+	b.SetStatus(1)
+	b.leader = b.validators[1]
 	b.logger.Info("View change has been triggered")
 	/*
 		header := b.chain.CurrentHeader()
