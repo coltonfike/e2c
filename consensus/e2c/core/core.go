@@ -42,11 +42,11 @@ func New(backend e2c.Backend, config *e2c.Config, ch chan *types.Block) e2c.Engi
 		logger:         log.New(),
 		backend:        backend,
 		blockQueue:     NewBlockQueue(config.Delta),
-		vote:           make(map[common.Hash]uint64),
 		expectedHeight: big.NewInt(0),
 		ch:             ch,
-		blame:          make(map[common.Address]struct{}),
-		validates:      make(map[common.Address]struct{}),
+		blame:          make(map[common.Address]*e2c.Message),
+		validates:      make(map[common.Address]*e2c.Message),
+		vote:           make(map[common.Hash]map[common.Address]*e2c.Message),
 	}
 
 	return c
@@ -59,11 +59,12 @@ type core struct {
 	logger        log.Logger
 	ch            chan *types.Block
 	progressTimer *e2c.ProgressTimer
+	certTimer     *time.Timer
 
 	blockQueue *blockQueue
-	blame      map[common.Address]struct{}
-	validates  map[common.Address]struct{}
-	vote       map[common.Hash]uint64
+	blame      map[common.Address]*e2c.Message
+	validates  map[common.Address]*e2c.Message
+	vote       map[common.Hash]map[common.Address]*e2c.Message
 
 	expectedHeight *big.Int
 	backend        e2c.Backend
@@ -72,7 +73,7 @@ type core struct {
 	handlerWg    *sync.WaitGroup
 	lock         *types.Block
 	committed    *types.Block
-	highestCert  *types.Block
+	highestCert  *e2c.BlockCertificate
 	certReceived uint32
 	viewChange   uint32
 }
@@ -80,6 +81,7 @@ type core struct {
 func (c *core) Start(block *types.Block) error {
 	c.lock = block
 	c.progressTimer = e2c.NewProgressTimer(4 * c.config.Delta * time.Millisecond)
+	c.certTimer = time.NewTimer(1 * time.Millisecond)
 	c.subscribeEvents()
 	atomic.StoreUint32(&c.viewChange, 0)
 	go c.loop()
@@ -109,17 +111,7 @@ func (c *core) Lock() *types.Block {
 
 func (c *core) subscribeEvents() {
 	c.eventMux = c.backend.EventMux().Subscribe(
-		e2c.NewBlockEvent{},
-		e2c.RelayBlockEvent{},
-		e2c.BlameEvent{},
-		e2c.ValidateEvent{},
-		e2c.BlameCertificateEvent{},
-		e2c.BlockCertificateEvent{},
-		e2c.Vote{},
-		e2c.B1{},
-		e2c.B2{},
-		e2c.RequestBlockEvent{},
-		e2c.RespondToRequestEvent{},
+		e2c.MessageEvent{},
 	)
 }
 
@@ -153,7 +145,7 @@ func (c *core) requestBlock(hash common.Hash, addr common.Address) {
 }
 
 func (c *core) sendBlame() {
-	c.blame[c.backend.Address()] = struct{}{}
+	c.blame[c.backend.Address()] = &e2c.Message{}
 	// @todo race condition here
 	time.AfterFunc(2*c.config.Delta*time.Millisecond, func() {
 		delete(c.blame, c.backend.Address())

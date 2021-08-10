@@ -54,8 +54,7 @@ type RespondToRequestEvent struct {
 }
 
 type Vote struct {
-	Block   *types.Block
-	Address common.Address
+	Block []*types.Block
 }
 
 type BlameCertificateEvent struct {
@@ -64,8 +63,46 @@ type BlameCertificateEvent struct {
 	Address   common.Address
 }
 
-type BlockCertificateEvent struct {
+type BlockCertificate struct {
 	Block *types.Block
+	Votes []*Message
+}
+
+func (bc *BlockCertificate) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{bc.Block, bc.Votes})
+}
+
+func (bc *BlockCertificate) DecodeRLP(s *rlp.Stream) error {
+	var cert struct {
+		Block *types.Block
+		Votes []*Message
+	}
+
+	if err := s.Decode(&cert); err != nil {
+		return err
+	}
+	bc.Block, bc.Votes = cert.Block, cert.Votes
+	return nil
+}
+
+type BlameCert struct {
+	Blames []*Message
+}
+
+func (bc *BlameCert) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{bc.Blames})
+}
+
+func (bc *BlameCert) DecodeRLP(s *rlp.Stream) error {
+	var cert struct {
+		Blames []*Message
+	}
+
+	if err := s.Decode(&cert); err != nil {
+		return err
+	}
+	bc.Blames = cert.Blames
+	return nil
 }
 
 type BlameCertificate struct {
@@ -91,7 +128,7 @@ func (bc *BlameCertificate) DecodeRLP(s *rlp.Stream) error {
 }
 
 type B1 struct {
-	Cert  *types.Block
+	Cert  *BlockCertificate
 	Block *types.Block
 }
 
@@ -101,7 +138,7 @@ func (b *B1) EncodeRLP(w io.Writer) error {
 
 func (b *B1) DecodeRLP(s *rlp.Stream) error {
 	var cert struct {
-		Cert  *types.Block
+		Cert  *BlockCertificate
 		Block *types.Block
 	}
 
@@ -114,7 +151,7 @@ func (b *B1) DecodeRLP(s *rlp.Stream) error {
 
 type B2 struct {
 	//@todo change this to array of validate messages
-	Validates *types.Block
+	Validates []*Message
 	Block     *types.Block
 }
 
@@ -124,7 +161,7 @@ func (b *B2) EncodeRLP(w io.Writer) error {
 
 func (b *B2) DecodeRLP(s *rlp.Stream) error {
 	var cert struct {
-		Validates *types.Block
+		Validates []*Message
 		Block     *types.Block
 	}
 

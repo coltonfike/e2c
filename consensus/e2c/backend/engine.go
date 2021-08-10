@@ -238,14 +238,6 @@ func (b *backend) verifySigner(chain consensus.ChainHeaderReader, header *types.
 		if signer != b.leader {
 			return errUnauthorized
 		}
-	} else {
-		snap, err := b.snapshot(chain, number-1, header.ParentHash, parents)
-		if err != nil {
-			return err
-		}
-		if signer != snap.Leader {
-			return errUnauthorized
-		}
 	}
 	return nil
 }
@@ -362,7 +354,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		b.ch <- block
 		results <- block
 	} else if status == 3 {
-		fmt.Println("PUtting into channel")
+		fmt.Println("Putting into channel")
 		b.ch <- block
 		results <- block
 		fmt.Println("Here's where I put second block in event channel!")

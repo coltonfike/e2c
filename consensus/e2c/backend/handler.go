@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -82,102 +81,7 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		}
 		b.knownMessages.Add(hash, true)
 
-		msg := new(message)
-		if err := msg.FromPayload(data); err != nil {
-			return true, err
-		}
-
-		switch msg.Code {
-		case newBlockMsgCode:
-			// If this message isn't from the leader, then drop the peer
-			if msg.Address != b.leader {
-				return true, errUnauthorized
-			}
-
-			var block *types.Block
-			if err := msg.Decode(&block); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(e2c.NewBlockEvent{Block: block})
-
-		case relayMsgCode:
-
-			var hash common.Hash
-			if err := msg.Decode(&hash); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(e2c.RelayBlockEvent{Hash: hash, Address: msg.Address})
-
-		case blameMsgCode:
-
-			var t time.Time
-			if err := msg.Decode(&t); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(e2c.BlameEvent{Time: t, Address: msg.Address})
-
-		case validateMsgCode:
-
-			var t time.Time
-			if err := msg.Decode(&t); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(e2c.ValidateEvent{Time: t, Address: msg.Address})
-
-		case blameCertCode:
-
-			var bc e2c.BlameCertificate
-			if err := msg.Decode(&bc); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(e2c.BlameCertificateEvent{Lock: bc.Lock, Committed: bc.Committed, Address: msg.Address})
-
-		case voteMsgCode:
-			var block *types.Block
-			if err := msg.Decode(&block); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(e2c.Vote{Block: block, Address: msg.Address})
-
-		case blockCertMsgCode:
-			var block *types.Block
-			if err := msg.Decode(&block); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(e2c.BlockCertificateEvent{Block: block})
-
-		case newBlockOneMsgCode:
-			var block e2c.B1
-			if err := msg.Decode(&block); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(block)
-
-		case finalBlockMsgCode:
-			var block e2c.B2
-			if err := msg.Decode(&block); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(block)
-
-		case requestBlockMsgCode:
-
-			var request common.Hash
-			if err := msg.Decode(&request); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(e2c.RequestBlockEvent{Hash: request, Address: msg.Address})
-
-		case respondToRequestMsgCode:
-
-			var block *types.Block
-			if err := msg.Decode(&block); err != nil {
-				return true, err
-			}
-			b.eventMux.Post(e2c.RespondToRequestEvent{Block: block})
-		}
-
-		return true, nil
+		go b.eventMux.Post(e2c.MessageEvent{Payload: data})
 	}
 	//@todo, both of these lower ones need to be adjusted so that we only reject ones that we handle
 	// We commit our own blocks, and thus, don't want this to run on the protocol manager
@@ -202,8 +106,9 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			b.clientBlocks[request.Block.Hash()] = 1
 		}
 
+		// @todo there is a bug here on view change
 		fmt.Println("Block received. Total acks for block", request.Block.Number().String(), ":", b.clientBlocks[request.Block.Hash()])
-		if b.clientBlocks[request.Block.Hash()] >= b.config.F {
+		if b.clientBlocks[request.Block.Hash()] == b.config.F+1 {
 			b.Commit(request.Block)
 
 			delete(b.clientBlocks, request.Block.ParentHash())

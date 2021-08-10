@@ -152,6 +152,31 @@ func (b *backend) Broadcast(payload []byte) error {
 	return nil
 }
 
+func (b *backend) SendToOne(payload []byte, addr common.Address) error {
+	hash := e2c.RLPHash(payload)
+	ps := b.broadcaster.PeerSet()
+	p, ok := ps[addr]
+	if !ok {
+		return errors.New("No peer with that address")
+	}
+	ms, ok := b.recentMessages.Get(addr)
+	var c *lru.ARCCache
+	if ok {
+		c, _ = ms.(*lru.ARCCache)
+		if _, k := c.Get(hash); k {
+			// This peer had this event, skip it
+			return nil
+		}
+	} else {
+		c, _ = lru.NewARC(inmemoryMessages)
+	}
+
+	c.Add(hash, true)
+	b.recentMessages.Add(addr, c)
+	go p.SendConsensus(e2cMsg, payload)
+	return nil
+}
+
 func (b *backend) SendBlockOne(block e2c.B1) error {
 
 	msg, err := Encode(&block)

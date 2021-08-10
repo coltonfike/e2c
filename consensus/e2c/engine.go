@@ -37,6 +37,7 @@ type Backend interface {
 
 	// Broadcast sends a message to all peers
 	Broadcast(payload []byte) error
+	SendToOne([]byte, common.Address) error
 
 	// Sends a new block to all peers
 	SendNewBlock(*types.Block) error

@@ -19,7 +19,6 @@ package core
 import (
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -43,29 +42,10 @@ func (c *core) loop() {
 			}
 
 			switch ev := event.Data.(type) {
-			case e2c.NewBlockEvent:
-				c.handleBlock(ev.Block)
-			case e2c.RelayBlockEvent:
-				c.handleRelay(ev.Hash, ev.Address)
-			case e2c.BlameEvent:
-				c.handleBlame(ev.Time, ev.Address)
-			case e2c.BlameCertificateEvent:
-				c.handleCert(ev.Lock, ev.Committed, ev.Address)
-			case e2c.BlockCertificateEvent:
-				c.handleBlockCert(ev.Block)
-			case e2c.Vote:
-				c.handleVote(ev.Block, ev.Address)
-			case e2c.RequestBlockEvent:
-				c.handleRequest(ev.Hash, ev.Address)
-			case e2c.RespondToRequestEvent:
-				c.handleResponse(ev.Block)
-			case e2c.ValidateEvent:
-				c.handleValidate(ev.Address)
-
-			case e2c.B1:
-				c.handleB1(ev)
-			case e2c.B2:
-				c.handleB2(ev)
+			case e2c.MessageEvent:
+				if err := c.handleMsg(ev.Payload); err != nil {
+					// print err
+				}
 			}
 
 		case <-c.blockQueue.c():
@@ -80,8 +60,74 @@ func (c *core) loop() {
 				c.sendBlame()
 				c.logger.Info("Progress Timer expired! Sending Blame message!")
 			}
+		case <-c.certTimer.C:
+			fmt.Println("Timer expired")
+			if c.backend.Status() == 1 {
+				c.sendB1()
+			}
 		}
 	}
+}
+
+func (c *core) handleMsg(payload []byte) error {
+	msg := new(e2c.Message)
+	if err := msg.FromPayload(payload); err != nil {
+		// @todo print error message
+		return err
+	}
+
+	// @todo check message came from one of validators
+	// @todo add backlog stuff ??
+
+	switch msg.Code {
+	// @todo add a case for received blamecert
+	case e2c.NewBlockMsgCode:
+		if msg.Address != c.backend.Leader() {
+			return errors.New("errUnauthorized")
+		}
+		var block *types.Block
+		if err := msg.Decode(&block); err != nil {
+			return err
+		}
+		return c.handleBlock(block)
+
+		// @todo remove this
+	case e2c.RelayMsgCode:
+		var hash common.Hash
+		if err := msg.Decode(&hash); err != nil {
+			return err
+		}
+		return c.handleRelay(hash, msg.Address)
+
+	case e2c.BlameMsgCode:
+		return c.handleBlameMessage(msg)
+
+	case e2c.BlameCertCode:
+		return c.handleCert(msg)
+
+	case e2c.RequestBlockMsgCode:
+		return c.handleRequest(msg)
+
+	case e2c.RespondToRequestMsgCode:
+		return c.handleResponse(msg)
+
+	case e2c.ValidateMsgCode:
+		return c.handleValidate(msg)
+
+	case e2c.VoteMsgCode:
+		return c.handleVote(msg)
+
+	case e2c.NewBlockOneMsgCode:
+		return c.handleB1(msg)
+
+	case e2c.FinalBlockMsgCode:
+		return c.handleB2(msg)
+
+	case e2c.BlockCertMsgCode:
+		return c.handleBlockCert(msg)
+	}
+
+	return errors.New("Invalid message")
 }
 
 func (c *core) handleBlock(block *types.Block) error {
@@ -132,185 +178,4 @@ func (c *core) handleRelay(hash common.Hash, addr common.Address) error {
 
 	c.requestBlock(hash, addr)
 	return nil
-}
-
-func (c *core) handleBlame(t time.Time, addr common.Address) error {
-
-	if c.backend.Address() == c.backend.Leader() {
-		return nil
-	}
-
-	if _, ok := c.blame[addr]; !ok {
-		c.blame[addr] = struct{}{}
-	}
-
-	c.logger.Info("Blame message received", "total blame", len(c.blame))
-	if uint64(len(c.blame)) >= c.config.F {
-		atomic.StoreUint32(&c.viewChange, 1)
-		c.backend.ChangeView()
-		if c.backend.Address() != c.backend.Leader() {
-			c.vote[c.lock.Hash()] = 1
-			c.vote[c.committed.Hash()] = 1
-			c.backend.SendBlameCertificate(e2c.BlameCertificate{Lock: c.lock, Committed: c.committed})
-		}
-	}
-	return nil
-}
-
-func (c *core) handleCert(lock *types.Block, committed *types.Block, addr common.Address) {
-	fmt.Println("Handling Cert!")
-	if committed.Number().Uint64() >= c.committed.Number().Uint64() && committed.Number().Uint64() <= c.lock.Number().Uint64() {
-		fmt.Println("Sent vote")
-		c.backend.SendVote(committed, addr)
-	}
-	if lock.Number().Uint64() >= c.committed.Number().Uint64() && lock.Number().Uint64() <= c.lock.Number().Uint64() {
-		fmt.Println("Sent vote")
-		c.backend.SendVote(lock, addr)
-	}
-}
-
-func (c *core) handleVote(block *types.Block, addr common.Address) {
-	c.vote[block.Hash()]++
-	fmt.Println("Vote received!!")
-	if c.vote[block.Hash()] > c.config.F {
-		if c.highestCert == nil {
-			c.highestCert = block
-			fmt.Println("Block", block.Number().Uint64(), "certified. Sending certificate to new leader!")
-			c.backend.SendBlockCert(c.highestCert)
-		} else if c.highestCert.Number().Uint64() < block.Number().Uint64() {
-			c.highestCert = block
-			fmt.Println("Block", block.Number().Uint64(), "certified. Sending certificate to new leader!")
-			c.backend.SendBlockCert(c.highestCert)
-		}
-	}
-}
-
-func (c *core) handleBlockCert(block *types.Block) {
-	c.certReceived++
-	fmt.Println("BlockCert Received")
-	if c.highestCert == nil {
-		c.highestCert = block
-	} else if c.highestCert.Number().Uint64() < block.Number().Uint64() {
-		c.highestCert = block
-	}
-
-	// @todo change this to a timer?
-	if uint64(c.certReceived) >= 4 {
-		fmt.Println("Highest is", c.highestCert.Number())
-
-		for {
-			block, ok := c.blockQueue.getNext()
-			if !ok {
-				break
-			}
-			fmt.Println(block.Number())
-
-			if block.Number().Uint64() <= c.highestCert.Number().Uint64() {
-				c.commit(block)
-			}
-		}
-
-		c.backend.SetStatus(2)
-		block := <-c.ch
-		c.backend.SetStatus(3)
-		fmt.Println("Block", block.Number())
-		c.blockQueue.clear()
-		c.backend.SendBlockOne(e2c.B1{Cert: c.highestCert, Block: block})
-	}
-}
-
-func (c *core) handleRequest(hash common.Hash, addr common.Address) error {
-
-	c.logger.Debug("Request Received", "hash", hash, "address", addr)
-	block, err := c.backend.GetBlockFromChain(hash)
-	if err != nil {
-		p, ok := c.blockQueue.get(hash)
-		if !ok {
-			c.logger.Debug("Don't have requested block", "hash", hash, "address", addr)
-			return errors.New("don't have requested block")
-		}
-		block = p
-	}
-
-	go c.backend.RespondToRequest(block, addr)
-	return nil
-}
-
-func (c *core) handleResponse(block *types.Block) error {
-
-	if !c.blockQueue.hasRequest(block.Hash()) {
-		return nil
-	}
-
-	c.logger.Info("Response to request received", "number", block.Number().Uint64(), "hash", block.Hash())
-
-	if err := c.handleBlock(block); err != nil {
-		return err
-	}
-	delete(c.blockQueue.requestQueue, block.Hash())
-
-	for {
-		if child, ok := c.blockQueue.getChild(block.Hash()); ok {
-			if err := c.handleBlock(child); err != nil {
-				return err
-			}
-			block = child
-		} else {
-			break
-		}
-	}
-	return nil
-}
-
-func (c *core) handleB1(b e2c.B1) {
-	if b.Cert.Number().Uint64() < c.highestCert.Number().Uint64() {
-		// @todo also check votes are correct
-		c.backend.SendBlame()
-	}
-	for {
-		block, ok := c.blockQueue.getNext()
-		if !ok {
-			break
-		}
-		fmt.Println(block.Number())
-
-		if block.Number().Uint64() <= c.highestCert.Number().Uint64() {
-			c.commit(block)
-		}
-	}
-	c.blockQueue.clear()
-	if err := c.verify(b.Block); err != nil {
-		c.backend.SendBlame()
-	}
-	c.blockQueue.insertHandled(b.Block)
-	c.lock = b.Block
-	c.backend.SendValidate()
-	c.backend.SetStatus(2)
-	fmt.Println("Check 1 Passed, sending Ack")
-}
-
-func (c *core) handleValidate(addr common.Address) {
-	fmt.Println("Received validate")
-	c.validates[addr] = struct{}{}
-	// @todo replace with F, but can't now because node 1 dies when it's bad
-	if uint64(len(c.validates)) >= 2 {
-		fmt.Println("Trying to read from ch")
-		block := <-c.ch
-		c.backend.SendFinal(e2c.B2{Validates: block, Block: block})
-		fmt.Println("Sent final")
-		c.backend.SetStatus(0)
-	}
-}
-
-func (c *core) handleB2(b e2c.B2) {
-
-	// @todo do error checking here
-
-	fmt.Println("Recieved final block!")
-	if err := c.verify(b.Block); err != nil {
-		c.backend.SendBlame()
-	}
-	c.blockQueue.insertHandled(b.Block)
-	c.lock = b.Block
-	c.backend.SetStatus(0)
 }
