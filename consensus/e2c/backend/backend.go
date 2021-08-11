@@ -19,7 +19,6 @@ package backend
 import (
 	"crypto/ecdsa"
 	"errors"
-	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -61,6 +60,7 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 		recentMessages: recentMessages,
 		knownMessages:  knownMessages,
 		status:         0,
+		view:           0,
 		ch:             make(chan *types.Block),
 		// @ todo add a timeout feature for clientBlocks
 		clientBlocks: make(map[common.Hash]uint64),
@@ -86,6 +86,7 @@ type backend struct {
 	coreStarted bool
 	coreMu      sync.RWMutex
 	status      uint32
+	view        uint64
 
 	ch chan *types.Block
 
@@ -111,7 +112,11 @@ func (b *backend) Address() common.Address {
 
 // Validators implements e2c.Backend.Validators
 func (b *backend) Leader() common.Address {
-	return b.leader
+	return b.validators[b.view%uint64(len(b.validators))]
+}
+
+func (b *backend) View() uint64 {
+	return b.view
 }
 
 func (b *backend) Status() uint32 {
@@ -181,7 +186,6 @@ func (b *backend) SendBlockOne(block e2c.B1) error {
 
 	msg, err := Encode(&block)
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 
@@ -193,11 +197,9 @@ func (b *backend) SendBlockOne(block e2c.B1) error {
 
 	payload, err := m.PayloadWithSig(b.Sign)
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 
-	fmt.Println("Sending New block one!")
 	go b.Broadcast(payload)
 	return nil
 }
@@ -206,7 +208,6 @@ func (b *backend) SendFinal(block e2c.B2) error {
 
 	msg, err := Encode(&block)
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 
@@ -218,11 +219,9 @@ func (b *backend) SendFinal(block e2c.B2) error {
 
 	payload, err := m.PayloadWithSig(b.Sign)
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 
-	fmt.Println("Sending New final block!")
 	go b.Broadcast(payload)
 	return nil
 }
@@ -405,7 +404,7 @@ func (b *backend) SendVote(block *types.Block, addr common.Address) error {
 }
 
 func (b *backend) SendBlockCert(block *types.Block) error {
-	addr := b.validators[1]
+	addr := b.Leader()
 	msg, err := Encode(block)
 	if err != nil {
 		return err
@@ -572,8 +571,9 @@ func (b *backend) Verify(block *types.Block) error {
 
 func (b *backend) ChangeView() {
 	b.SetStatus(1)
-	b.leader = b.validators[1]
-	b.logger.Info("View change has been triggered")
+	b.view++
+	b.leader = b.Leader()
+	b.logger.Info("View change has been triggered", "leader", b.Leader())
 	/*
 		header := b.chain.CurrentHeader()
 		b.SendBlameCertificate(&e2c.BlameCertificate{

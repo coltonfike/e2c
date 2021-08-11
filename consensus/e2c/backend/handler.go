@@ -18,7 +18,6 @@ package backend
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -96,7 +95,6 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			TD    *big.Int
 		}
 		if err := msg.Decode(&request); err != nil {
-			fmt.Println(err)
 			return true, err
 		}
 
@@ -107,12 +105,12 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		}
 
 		// @todo there is a bug here on view change
-		fmt.Println("Block received. Total acks for block", request.Block.Number().String(), ":", b.clientBlocks[request.Block.Hash()])
+		b.logger.Info("Block acknowledgement received", "number", request.Block.Number(), "hash", request.Block.Hash(), "total acks", b.clientBlocks[request.Block.Hash()])
 		if b.clientBlocks[request.Block.Hash()] == b.config.F+1 {
 			b.Commit(request.Block)
 
 			delete(b.clientBlocks, request.Block.ParentHash())
-			fmt.Println("Client committed block", request.Block.Number().String())
+			b.logger.Info("Client committed block", "number", request.Block.Number(), "hash", request.Block.Hash())
 		}
 		return true, nil
 	}

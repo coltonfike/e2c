@@ -19,7 +19,6 @@ package backend
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -354,10 +353,8 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		b.ch <- block
 		results <- block
 	} else if status == 3 {
-		fmt.Println("Putting into channel")
 		b.ch <- block
 		results <- block
-		fmt.Println("Here's where I put second block in event channel!")
 	}
 	return nil
 	// go func() {

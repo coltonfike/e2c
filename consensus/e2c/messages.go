@@ -66,7 +66,6 @@ func (m *Message) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	if err := s.Decode(&msg); err != nil {
-		fmt.Println("B", err)
 		return err
 	}
 	m.Code, m.Msg, m.Address, m.Signature = msg.Code, msg.Msg, msg.Address, msg.Signature

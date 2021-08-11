@@ -18,7 +18,6 @@ package core
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -125,7 +124,6 @@ func (c *core) verify(block *types.Block) error {
 	}
 	if block.Number().Uint64() != (c.lock.Number().Uint64() + 1) {
 		//@todo add real error here
-		fmt.Println("Number:", block.Number(), "Expected:", c.lock.Number().Uint64()+1)
 		return errors.New("equivocation detected")
 	}
 	return nil

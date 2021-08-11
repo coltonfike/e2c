@@ -2,7 +2,6 @@
 package core
 
 import (
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 func (c *core) handleBlameMessage(msg *e2c.Message) error {
 	var t time.Time
 	if err := msg.Decode(&t); err != nil {
-		fmt.Println("DDDD")
 		return err
 	}
 
@@ -28,6 +26,7 @@ func (c *core) handleBlameMessage(msg *e2c.Message) error {
 	c.logger.Info("Blame message received", "total blame", len(c.blame))
 
 	// @todo send blame certificate, then wait 1 delta, then send votes..
+	// @todo handle blame cert!
 	if uint64(len(c.blame)) >= c.config.F {
 		if c.backend.Status() != 0 {
 			return nil
@@ -53,9 +52,7 @@ func (c *core) handleBlameMessage(msg *e2c.Message) error {
 			return err
 		}
 		c.backend.Broadcast(p)
-		fmt.Println("Waiting!!")
 		<-time.After(c.config.Delta * time.Millisecond)
-		fmt.Println("Done waiting!!")
 
 		msg, err = e2c.Encode(c.committed)
 		if err != nil {
@@ -79,15 +76,13 @@ func (c *core) handleBlameMessage(msg *e2c.Message) error {
 		}
 		v2.Sign(c.backend.Sign)
 
-		// @todo don't recalculate hash each time here
-		fmt.Println("Hashes", c.committed.Hash().String(), c.lock.Hash().String())
+		c.logger.Info("Proposing blocks for voting", "committed number", c.committed.Number(), "committed hash", c.committed.Hash(), "lock number", c.lock.Number(), "lock hash", c.lock.Hash())
 		c.vote[c.committed.Hash()] = make(map[common.Address]*e2c.Message)
 		c.vote[c.lock.Hash()] = make(map[common.Address]*e2c.Message)
 		c.vote[c.committed.Hash()][c.backend.Address()] = v1
 		c.vote[c.lock.Hash()][c.backend.Address()] = v2
 		c.backend.SendBlameCertificate(e2c.BlameCertificate{Lock: c.lock, Committed: c.committed})
 		if c.backend.Address() == c.backend.Leader() {
-			fmt.Println("\n\n\nResetting Timer")
 			c.certTimer.Reset(4 * c.config.Delta * time.Millisecond)
 		}
 	}
@@ -97,12 +92,11 @@ func (c *core) handleBlameMessage(msg *e2c.Message) error {
 func (c *core) handleCert(msg *e2c.Message) error {
 	var bc e2c.BlameCertificate
 	if err := msg.Decode(&bc); err != nil {
-		fmt.Println("EEE")
 		return err
 	}
-	fmt.Println("Handling Cert!")
+	c.logger.Info("Received proposal for new block", "addr", msg.Address)
 	if bc.Committed.Number().Uint64() >= c.committed.Number().Uint64() && bc.Committed.Number().Uint64() <= c.lock.Number().Uint64() {
-		fmt.Println("Sent vote")
+		c.logger.Info("Voted for block", "number", bc.Committed.Number(), "hash", bc.Committed.Hash())
 		m, err := e2c.Encode(c.committed)
 		if err != nil {
 			return err
@@ -119,7 +113,7 @@ func (c *core) handleCert(msg *e2c.Message) error {
 		c.backend.SendToOne(payload, msg.Address)
 	}
 	if bc.Lock.Number().Uint64() >= c.committed.Number().Uint64() && bc.Lock.Number().Uint64() <= c.lock.Number().Uint64() {
-		fmt.Println("Sent vote")
+		c.logger.Info("Voted for block", "number", bc.Lock.Number(), "hash", bc.Lock.Hash())
 		m, err := e2c.Encode(c.lock)
 		if err != nil {
 			return err
@@ -141,15 +135,13 @@ func (c *core) handleCert(msg *e2c.Message) error {
 func (c *core) handleValidate(msg *e2c.Message) error {
 	var t time.Time
 	if err := msg.Decode(&t); err != nil {
-		fmt.Println("FFF")
 		return err
 	}
 
-	fmt.Println("Received validate")
+	c.logger.Info("Received validate message", "addr", msg.Address)
 	c.validates[msg.Address] = msg
 	// @todo replace with F, but can't now because node 1 dies when it's bad
-	if uint64(len(c.validates)) >= 2 {
-		fmt.Println("Trying to read from ch")
+	if uint64(len(c.validates)) == 2 {
 		block := <-c.ch
 
 		var validates []*e2c.Message
@@ -158,7 +150,7 @@ func (c *core) handleValidate(msg *e2c.Message) error {
 		}
 
 		c.backend.SendFinal(e2c.B2{Block: block, Validates: validates})
-		fmt.Println("Sent final")
+		c.logger.Info("Sent proposal for second block in view", "number", block.Number(), "hash", block.Hash(), "validates", validates)
 		c.backend.SetStatus(0)
 	}
 	return nil
@@ -167,12 +159,11 @@ func (c *core) handleValidate(msg *e2c.Message) error {
 func (c *core) handleVote(msg *e2c.Message) error {
 	var block *types.Block
 	if err := msg.Decode(&block); err != nil {
-		fmt.Println("GGG")
 		return err
 	}
 	// @todo don't recalculate hash
 	c.vote[block.Hash()][msg.Address] = msg
-	fmt.Println("Vote received!!")
+	c.logger.Info("Received vote message", "number", block.Number(), "hash", block.Hash(), "addr", msg.Address)
 	if uint64(len(c.vote[block.Hash()])) > c.config.F {
 
 		if c.highestCert == nil {
@@ -186,12 +177,14 @@ func (c *core) handleVote(msg *e2c.Message) error {
 				Votes: votes,
 			}
 
-			fmt.Println(c.highestCert.Votes)
-			fmt.Println("Block", block.Number().Uint64(), "certified. Sending certificate to new leader!")
+			if c.backend.Address() == c.backend.Leader() {
+				c.logger.Info("Block is certified!", "number", block.Number(), "hash", block.Hash(), "votes", votes)
+			} else {
+				c.logger.Info("Block is certified! Sending to leader", "number", block.Number(), "hash", block.Hash(), "votes", votes)
+			}
 
 			m, err := e2c.Encode(c.highestCert)
 			if err != nil {
-				fmt.Println("A", err)
 				return err
 			}
 			mm := &e2c.Message{
@@ -207,10 +200,8 @@ func (c *core) handleVote(msg *e2c.Message) error {
 
 			var block *e2c.BlockCertificate
 			if err := mm.Decode(&block); err != nil {
-				fmt.Println("Here", err)
 				return err
 			}
-			fmt.Println("\n\nDecoded success!!")
 
 		} else if c.highestCert.Block.Number().Uint64() < block.Number().Uint64() {
 
@@ -223,7 +214,12 @@ func (c *core) handleVote(msg *e2c.Message) error {
 				Block: block,
 				Votes: votes,
 			}
-			fmt.Println("Block", block.Number().Uint64(), "certified. Sending certificate to new leader!")
+
+			if c.backend.Address() == c.backend.Leader() {
+				c.logger.Info("Block is certified!", "number", block.Number(), "hash", block.Hash(), "votes", votes)
+			} else {
+				c.logger.Info("Block is certified! Sending to leader", "number", block.Number(), "hash", block.Hash(), "votes", votes)
+			}
 			m, err := e2c.Encode(c.highestCert)
 			if err != nil {
 				return err
@@ -243,24 +239,22 @@ func (c *core) handleVote(msg *e2c.Message) error {
 	return nil
 }
 
+// @todo reject this message if you aren't the leader
 func (c *core) handleBlockCert(msg *e2c.Message) error {
 	var block *e2c.BlockCertificate
 	if err := msg.Decode(&block); err != nil {
-		fmt.Println("here", err)
 		return err
 	}
 
-	c.certReceived++
-	fmt.Println("\n\nBlockCert Received!!")
-	fmt.Println(block.Votes)
+	c.logger.Info("Block certificate received!", "addr", msg.Address)
 
 	if uint64(len(block.Votes)) <= c.config.F {
-		fmt.Println("Block cert not enough votes")
+		c.logger.Warn("Block certificate rejected", "err", "not enough votes")
 		return nil
 	}
 	for _, m := range block.Votes {
 		if err := m.VerifySig(); err != nil || m.Code != e2c.VoteMsgCode {
-			fmt.Println("block cert not being valid")
+			c.logger.Warn("Block certificate rejected", "err", "vote message invalid")
 			return nil
 		}
 	}
@@ -276,14 +270,11 @@ func (c *core) handleBlockCert(msg *e2c.Message) error {
 
 func (c *core) sendB1() {
 
-	fmt.Println("Highest is", c.highestCert.Block.Number())
-
 	for {
 		block, ok := c.blockQueue.getNext()
 		if !ok {
 			break
 		}
-		fmt.Println(block.Number())
 
 		if block.Number().Uint64() <= c.highestCert.Block.Number().Uint64() {
 			c.commit(block)
@@ -293,7 +284,7 @@ func (c *core) sendB1() {
 	c.backend.SetStatus(2)
 	block := <-c.ch
 	c.backend.SetStatus(3)
-	fmt.Println("Block", block.Number())
+	c.logger.Info("Proposing new block", "number", block.Number(), "hash", block.Hash().String(), "certificate", c.highestCert)
 	c.blockQueue.clear()
 	c.backend.SendBlockOne(e2c.B1{Cert: c.highestCert, Block: block})
 }
@@ -301,24 +292,26 @@ func (c *core) sendB1() {
 func (c *core) handleB1(msg *e2c.Message) error {
 	var b e2c.B1
 	if err := msg.Decode(&b); err != nil {
-		fmt.Println("HHH")
 		return err
 	}
+
+	c.logger.Info("Proposal for first block in view received", "number", b.Block.Number(), "hash", b.Block.Hash().String())
+
 	if b.Cert.Block.Number().Uint64() < c.highestCert.Block.Number().Uint64() {
 		c.backend.SendBlame()
-		fmt.Println("Blame Sent for not extending block")
+		c.logger.Warn("Blame sent", "err", "does not extend block")
 		return nil
 	}
 
 	if uint64(len(b.Cert.Votes)) <= c.config.F {
 		c.backend.SendBlame()
-		fmt.Println("Blame Sent for not enough votes")
+		c.logger.Warn("Blame sent", "err", "does not contain enough votes")
 		return nil
 	}
 	for _, m := range b.Cert.Votes {
 		if err := m.VerifySig(); err != nil || m.Code != e2c.VoteMsgCode {
 			c.backend.SendBlame()
-			fmt.Println("Blame sent for block cert not being valid")
+			c.logger.Warn("Blame sent", "err", "votes not valid")
 			return nil
 		}
 	}
@@ -328,7 +321,6 @@ func (c *core) handleB1(msg *e2c.Message) error {
 		if !ok {
 			break
 		}
-		fmt.Println(block.Number())
 
 		if block.Number().Uint64() <= c.highestCert.Block.Number().Uint64() {
 			c.commit(block)
@@ -336,45 +328,47 @@ func (c *core) handleB1(msg *e2c.Message) error {
 	}
 	c.blockQueue.clear()
 	if err := c.verify(b.Block); err != nil {
+		c.logger.Warn("Blame sent", "err", "invalid block")
 		c.backend.SendBlame()
 	}
 	c.blockQueue.insertHandled(b.Block)
 	c.lock = b.Block
 	c.backend.SendValidate()
 	c.backend.SetStatus(2)
-	fmt.Println("Check 1 Passed, sending Ack")
+	c.logger.Info("Sending validate for first block in view", "number", b.Block.Number(), "hash", b.Block.Hash().String())
 	return nil
 }
 
 func (c *core) handleB2(msg *e2c.Message) error {
 	var b e2c.B2
 	if err := msg.Decode(&b); err != nil {
-		fmt.Println("CCC", err)
 		return err
 	}
 
-	// @todo do error checking here
+	c.logger.Info("Proposal for second block in view received", "number", b.Block.Number(), "hash", b.Block.Hash().String(), "validates", b.Validates)
+
 	// @todo check that each message if from different addr
 	// @todo change 2 to F when we get it working
 	if uint64(len(b.Validates)) < 2 {
 		c.backend.SendBlame()
-		fmt.Println("Blame Sent for not enough Validates")
+		c.logger.Warn("Blame sent", "err", "does not contain enough validates")
 		return nil
 	}
 	for _, m := range b.Validates {
 		if err := m.VerifySig(); err != nil || m.Code != e2c.ValidateMsgCode {
 			c.backend.SendBlame()
-			fmt.Println("Blame sent for validate msg not being valid")
+			c.logger.Warn("Blame sent", "err", "validates not valid")
 			return nil
 		}
 	}
 
-	fmt.Println("Received final block!")
 	if err := c.verify(b.Block); err != nil {
+		c.logger.Warn("Blame sent", "err", "invalid block")
 		c.backend.SendBlame()
 	}
 	c.blockQueue.insertHandled(b.Block)
 	c.lock = b.Block
 	c.backend.SetStatus(0)
+	c.logger.Info("View Change completed! Resuming normal operations")
 	return nil
 }

@@ -18,7 +18,6 @@ package core
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -61,7 +60,6 @@ func (c *core) loop() {
 				c.logger.Info("Progress Timer expired! Sending Blame message!")
 			}
 		case <-c.certTimer.C:
-			fmt.Println("Timer expired")
 			if c.backend.Status() == 1 {
 				c.sendB1()
 			}
