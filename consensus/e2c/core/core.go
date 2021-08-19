@@ -45,7 +45,7 @@ func New(backend e2c.Backend, config *e2c.Config, ch chan *types.Block) e2c.Engi
 		ch:             ch,
 		blame:          make(map[common.Address]*e2c.Message),
 		validates:      make(map[common.Address]*e2c.Message),
-		vote:           make(map[common.Hash]map[common.Address]*e2c.Message),
+		votes:          make(map[common.Hash]map[common.Address]*e2c.Message),
 	}
 
 	return c
@@ -63,7 +63,7 @@ type core struct {
 	blockQueue *blockQueue
 	blame      map[common.Address]*e2c.Message
 	validates  map[common.Address]*e2c.Message
-	vote       map[common.Hash]map[common.Address]*e2c.Message
+	votes      map[common.Hash]map[common.Address]*e2c.Message
 
 	expectedHeight *big.Int
 	backend        e2c.Backend
@@ -133,20 +133,42 @@ func (c *core) commit(block *types.Block) {
 
 	c.backend.Commit(block)
 	c.committed = block
-	c.logger.Info("Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())
+	c.logger.Info("[E2C] Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())
 }
 
-// @todo add a timeout feature!
-func (c *core) requestBlock(hash common.Hash, addr common.Address) {
-	c.blockQueue.insertRequest(hash)
-	go c.backend.RequestBlock(hash, addr)
+func (c *core) finalizeMessage(msg *e2c.Message) ([]byte, error) {
+	msg.Address = c.backend.Address()
+
+	data, err := msg.PayloadWithSig(c.backend.Sign)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
 }
 
-func (c *core) sendBlame() {
-	c.blame[c.backend.Address()] = &e2c.Message{}
-	// @todo race condition here
-	time.AfterFunc(2*c.config.Delta*time.Millisecond, func() {
-		delete(c.blame, c.backend.Address())
-	})
-	c.backend.SendBlame()
+func (c *core) broadcast(msg *e2c.Message) {
+	payload, err := c.finalizeMessage(msg)
+	if err != nil {
+		c.logger.Error("Failed to finalize message", "msg", msg, "err", err)
+		return
+	}
+
+	if err = c.backend.Broadcast(payload); err != nil {
+		c.logger.Error("Failed to broadcast message", "msg", msg, "err", err)
+		return
+	}
+}
+
+func (c *core) send(msg *e2c.Message, addr common.Address) {
+	payload, err := c.finalizeMessage(msg)
+	if err != nil {
+		c.logger.Error("Failed to finalize message", "msg", msg, "err", err)
+		return
+	}
+
+	if err = c.backend.Send(payload, addr); err != nil {
+		c.logger.Error("Failed to send message", "msg", msg, "err", err, "addr", addr)
+		return
+	}
 }

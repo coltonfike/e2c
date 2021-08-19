@@ -19,43 +19,56 @@ package e2c
 import (
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
-type NewBlockEvent struct {
-	Block *types.Block
+type Blame struct {
+	View uint64
+	// Are these necessary?
+	//	Block     *types.Block
+	//	BlockStar *types.Block
 }
 
-type RelayBlockEvent struct {
-	Hash    common.Hash
-	Address common.Address
+func (b *Blame) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{b.View}) //, b.Block, b.BlockStar})
 }
 
-type BlameEvent struct {
-	Time    time.Time
-	Address common.Address
-}
+func (b *Blame) DecodeRLP(s *rlp.Stream) error {
+	var blame struct {
+		View uint64
+		// Block     *types.Block
+		// BlockStar *types.Block
+	}
 
-type ValidateEvent struct {
-	Time    time.Time
-	Address common.Address
-}
-
-type RequestBlockEvent struct {
-	Hash    common.Hash
-	Address common.Address
-}
-
-type RespondToRequestEvent struct {
-	Block *types.Block
+	if err := s.Decode(&blame); err != nil {
+		return err
+	}
+	// b.View, b.Block, b.BlockStar = blame.View, blame.Block, blame.BlockStar
+	b.View = blame.View
+	return nil
 }
 
 type Vote struct {
-	Block []*types.Block
+	Blocks []*Message
+}
+
+func (v *Vote) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{v.Blocks})
+}
+
+func (v *Vote) DecodeRLP(s *rlp.Stream) error {
+	var vote struct {
+		Blocks []*Message
+	}
+
+	if err := s.Decode(&vote); err != nil {
+		return err
+	}
+	v.Blocks = vote.Blocks
+	return nil
 }
 
 type BlameCertificateEvent struct {

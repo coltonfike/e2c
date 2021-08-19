@@ -31,36 +31,15 @@ type Backend interface {
 	Leader() common.Address
 	Status() uint32
 	SetStatus(uint32)
+	View() uint64
 
 	// EventMux returns the event mux in backend
 	EventMux() *event.TypeMux
 
 	// Broadcast sends a message to all peers
 	Broadcast(payload []byte) error
-	SendToOne([]byte, common.Address) error
+	Send([]byte, common.Address) error
 
-	// Sends a new block to all peers
-	SendNewBlock(*types.Block) error
-	SendBlockOne(B1) error
-	SendFinal(B2) error
-
-	// Relays a block header to all peers
-	RelayBlock(common.Hash) error
-
-	// Sends blame message to all peers
-	SendBlame() error
-	SendValidate() error
-	SendVote(*types.Block, common.Address) error
-	SendBlameCertificate(BlameCertificate) error
-	SendBlockCert(*types.Block) error
-
-	// Requests a block from peers
-	RequestBlock(common.Hash, common.Address) error
-
-	// Responds to a request for a block
-	RespondToRequest(*types.Block, common.Address) error
-
-	// The block will be put into blockchain.
 	Commit(*types.Block)
 
 	// Verify verifies the block is valid

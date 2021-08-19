@@ -141,4 +141,5 @@ func (bq *blockQueue) clear() {
 	for k := range bq.queue {
 		delete(bq.queue, k)
 	}
+	bq.timer.Stop()
 }

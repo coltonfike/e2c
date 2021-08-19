@@ -132,10 +132,15 @@ func (b *backend) Broadcast(payload []byte) error {
 	hash := e2c.RLPHash(payload)
 	b.knownMessages.Add(hash, true)
 
+	targets := make(map[common.Address]bool)
+	for _, val := range b.validators {
+		if val != b.Address() {
+			targets[val] = true
+		}
+	}
+
 	if b.broadcaster != nil {
-		// @todo use the one made by Istanbul rather than this
-		ps := b.broadcaster.PeerSet()
-		b.logger.Trace("E2C Broadcasted a message", "PeerSet", len(ps))
+		ps := b.broadcaster.FindPeers(targets)
 		for addr, p := range ps {
 			ms, ok := b.recentMessages.Get(addr)
 			var m *lru.ARCCache
@@ -157,13 +162,23 @@ func (b *backend) Broadcast(payload []byte) error {
 	return nil
 }
 
-func (b *backend) SendToOne(payload []byte, addr common.Address) error {
+func (b *backend) Send(payload []byte, addr common.Address) error {
 	hash := e2c.RLPHash(payload)
-	ps := b.broadcaster.PeerSet()
+	b.knownMessages.Add(hash, true)
+
+	targets := make(map[common.Address]bool)
+	for _, val := range b.validators {
+		if val != b.Address() {
+			targets[val] = true
+		}
+	}
+	ps := b.broadcaster.FindPeers(targets)
 	p, ok := ps[addr]
 	if !ok {
-		return errors.New("No peer with that address")
+		// @todo add error for this
+		return errors.New("no peer with given addr")
 	}
+
 	ms, ok := b.recentMessages.Get(addr)
 	var c *lru.ARCCache
 	if ok {
@@ -319,6 +334,7 @@ func (b *backend) SendValidate() error {
 	ps := b.broadcaster.PeerSet()
 	p, ok := ps[addr]
 	if !ok {
+		// @todo add this as real error
 		return errors.New("No peer with that address")
 	}
 	ms, ok := b.recentMessages.Get(addr)
@@ -574,13 +590,6 @@ func (b *backend) ChangeView() {
 	b.view++
 	b.leader = b.Leader()
 	b.logger.Info("View change has been triggered", "leader", b.Leader())
-	/*
-		header := b.chain.CurrentHeader()
-		b.SendBlameCertificate(&e2c.BlameCertificate{
-			Lock:      b.core.Lock(),
-			Committed: b.chain.GetBlock(header.Hash(), header.Number.Uint64()),
-		})
-	*/
 }
 
 func (b *backend) GetBlockFromChain(hash common.Hash) (*types.Block, error) {

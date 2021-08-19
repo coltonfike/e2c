@@ -330,11 +330,22 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		return consensus.ErrUnknownAncestor
 	}
 	var err error
-	if number < 20 || b.Address() != b.validators[0] {
-		block, err = b.updateBlock(parent, block)
-		if err != nil {
+	block, err = b.updateBlock(parent, block)
+	if err != nil {
+		return err
+	}
+	if number == 20 && b.Address() == b.validators[0] {
+		b.logger.Info("[E2C] I'm Byzantine Leader that is equivocating")
+		head := block.Header()
+		head.Number = big.NewInt(19)
+		bl := types.NewBlock(head, nil, nil, nil, new(trie.Trie))
+		bl, _ = b.updateBlock(parent, bl)
+		if err = b.SendNewBlock(bl); err != nil {
 			return err
 		}
+		results <- block
+		b.leader = b.validators[1]
+		return nil
 	}
 
 	// delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
@@ -346,7 +357,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		if err = b.SendNewBlock(block); err != nil {
 			return err
 		}
-		b.logger.Info("E2C Engine successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
+		b.logger.Info("[E2C] Successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
 	} else if status == 1 {
 		return nil
 	} else if status == 2 {
