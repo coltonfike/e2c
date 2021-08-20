@@ -16,9 +16,7 @@
 
 package core
 
-import (
-	"github.com/ethereum/go-ethereum/consensus/e2c"
-)
+import "github.com/ethereum/go-ethereum/consensus/e2c"
 
 func (c *core) loop() {
 	defer func() {
@@ -36,14 +34,18 @@ func (c *core) loop() {
 
 			switch ev := event.Data.(type) {
 			case e2c.MessageEvent:
-				msg := new(e2c.Message)
+				msg := new(Message)
 				if err := msg.FromPayload(ev.Payload); err != nil {
-					// @todo print error message
+					c.logger.Error("Failed to decode message", "err", err)
 				} else if c.handleMsg(msg) {
 					c.backend.Broadcast(ev.Payload)
 				}
 			}
 
+		case block := <-c.blockCh:
+			if err := c.propose(block); err != nil {
+				c.logger.Error("Failed to propose new block", "err", err)
+			}
 		case <-c.blockQueue.c():
 			if c.backend.Status() != 1 {
 				if block, ok := c.blockQueue.getNext(); ok {
@@ -51,7 +53,7 @@ func (c *core) loop() {
 				}
 			}
 
-		case <-c.progressTimer.Chan():
+		case <-c.progressTimer.c():
 			if c.backend.Address() != c.backend.Leader() {
 				c.sendBlame()
 				c.logger.Info("[E2C] Progress Timer expired! Sending Blame message!")
@@ -66,39 +68,39 @@ func (c *core) loop() {
 	}
 }
 
-func (c *core) handleMsg(msg *e2c.Message) bool {
+func (c *core) handleMsg(msg *Message) bool {
 	// @todo check message came from one of validators
 
 	switch msg.Code {
 	// @todo add a case for received blamecert
-	case e2c.NewBlockMsgCode:
+	case NewBlockMsg:
 		return c.handleProposal(msg)
 
-	case e2c.RequestBlockMsgCode:
+	case RequestBlockMsg:
 		return c.handleRequest(msg)
 
-	case e2c.RespondToRequestMsgCode:
+	case RespondMsg:
 		return c.handleResponse(msg)
 
-	case e2c.BlameMsgCode:
+	case BlameMsg:
 		return c.handleBlameMessage(msg)
 
-	case e2c.BlameCertCode:
+	case BlameCertificateMsg:
 		return c.handleBlameCertificate(msg)
 
-	case e2c.VoteMsgCode:
+	case VoteMsg:
 		return c.handleVote(msg)
 
-	case e2c.BlockCertMsgCode:
+	case BlockCertificateMsg:
 		return c.handleBlockCertificate(msg)
 
-	case e2c.NewBlockOneMsgCode:
+	case FirstProposalMsg:
 		return c.handleFirstProposal(msg)
 
-	case e2c.ValidateMsgCode:
+	case ValidateMsg:
 		return c.handleValidate(msg)
 
-	case e2c.FinalBlockMsgCode:
+	case SecondProposalMsg:
 		return c.handleSecondProposal(msg)
 	}
 

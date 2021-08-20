@@ -42,10 +42,10 @@ func New(backend e2c.Backend, config *e2c.Config, ch chan *types.Block) e2c.Engi
 		backend:        backend,
 		blockQueue:     NewBlockQueue(config.Delta),
 		expectedHeight: big.NewInt(0),
-		ch:             ch,
-		blame:          make(map[common.Address]*e2c.Message),
-		validates:      make(map[common.Address]*e2c.Message),
-		votes:          make(map[common.Hash]map[common.Address]*e2c.Message),
+		blockCh:        ch,
+		blame:          make(map[common.Address]*Message),
+		validates:      make(map[common.Address]*Message),
+		votes:          make(map[common.Hash]map[common.Address]*Message),
 	}
 
 	return c
@@ -56,14 +56,14 @@ func New(backend e2c.Backend, config *e2c.Config, ch chan *types.Block) e2c.Engi
 type core struct {
 	config        *e2c.Config
 	logger        log.Logger
-	ch            chan *types.Block
-	progressTimer *e2c.ProgressTimer
+	blockCh       chan *types.Block
+	progressTimer *ProgressTimer
 	certTimer     *time.Timer
 
 	blockQueue *blockQueue
-	blame      map[common.Address]*e2c.Message
-	validates  map[common.Address]*e2c.Message
-	votes      map[common.Hash]map[common.Address]*e2c.Message
+	blame      map[common.Address]*Message
+	validates  map[common.Address]*Message
+	votes      map[common.Hash]map[common.Address]*Message
 
 	expectedHeight *big.Int
 	backend        e2c.Backend
@@ -72,14 +72,14 @@ type core struct {
 	handlerWg    *sync.WaitGroup
 	lock         *types.Block
 	committed    *types.Block
-	highestCert  *e2c.BlockCertificate
+	highestCert  *BlockCertificate
 	certReceived uint32
 	viewChange   uint32
 }
 
 func (c *core) Start(block *types.Block) error {
 	c.lock = block
-	c.progressTimer = e2c.NewProgressTimer(4 * c.config.Delta * time.Millisecond)
+	c.progressTimer = NewProgressTimer(4 * c.config.Delta * time.Millisecond)
 	c.certTimer = time.NewTimer(1 * time.Millisecond)
 	c.subscribeEvents()
 	atomic.StoreUint32(&c.viewChange, 0)
@@ -136,7 +136,7 @@ func (c *core) commit(block *types.Block) {
 	c.logger.Info("[E2C] Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())
 }
 
-func (c *core) finalizeMessage(msg *e2c.Message) ([]byte, error) {
+func (c *core) finalizeMessage(msg *Message) ([]byte, error) {
 	msg.Address = c.backend.Address()
 
 	data, err := msg.PayloadWithSig(c.backend.Sign)
@@ -147,7 +147,7 @@ func (c *core) finalizeMessage(msg *e2c.Message) ([]byte, error) {
 	return data, nil
 }
 
-func (c *core) broadcast(msg *e2c.Message) {
+func (c *core) broadcast(msg *Message) {
 	payload, err := c.finalizeMessage(msg)
 	if err != nil {
 		c.logger.Error("Failed to finalize message", "msg", msg, "err", err)
@@ -160,7 +160,7 @@ func (c *core) broadcast(msg *e2c.Message) {
 	}
 }
 
-func (c *core) send(msg *e2c.Message, addr common.Address) {
+func (c *core) send(msg *Message, addr common.Address) {
 	payload, err := c.finalizeMessage(msg)
 	if err != nil {
 		c.logger.Error("Failed to finalize message", "msg", msg, "err", err)

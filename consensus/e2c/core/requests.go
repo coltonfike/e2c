@@ -5,7 +5,6 @@ package core
 
 import (
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -13,21 +12,21 @@ import (
 func (c *core) sendRequest(hash common.Hash, addr common.Address) error {
 	c.blockQueue.insertRequest(hash)
 
-	data, err := e2c.Encode(hash)
+	data, err := Encode(hash)
 	if err != nil {
 		return err
 	}
 
 	c.logger.Debug("Requesting missing block", "hash", hash)
-	c.broadcast(&e2c.Message{
-		Code: e2c.RequestBlockMsgCode,
+	c.broadcast(&Message{
+		Code: RequestBlockMsg,
 		Msg:  data,
 	})
 	return nil
 }
 
 // handles a request from another node for a specific block
-func (c *core) handleRequest(msg *e2c.Message) bool {
+func (c *core) handleRequest(msg *Message) bool {
 
 	var hash common.Hash
 	if err := msg.Decode(&hash); err != nil {
@@ -46,21 +45,21 @@ func (c *core) handleRequest(msg *e2c.Message) bool {
 		block = p
 	}
 
-	data, err := e2c.Encode(block)
+	data, err := Encode(block)
 	if err != nil {
 		c.logger.Error("Failed to encode response", "err", err)
 		return true
 	}
 
-	go c.send(&e2c.Message{
-		Code: e2c.RespondToRequestMsgCode,
+	go c.send(&Message{
+		Code: RespondMsg,
 		Msg:  data,
 	}, msg.Address) // if we have the block, send it to the node that requested it
 	return false
 }
 
 // handles a response to a request for a block
-func (c *core) handleResponse(msg *e2c.Message) bool {
+func (c *core) handleResponse(msg *Message) bool {
 	var block *types.Block
 	if err := msg.Decode(&block); err != nil {
 		c.logger.Error("Failed to decode response", "err", err)

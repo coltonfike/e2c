@@ -105,6 +105,11 @@ func (b *backend) VerifyHeader(chain consensus.ChainHeaderReader, header *types.
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
 func (b *backend) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+
+	if !b.coreStarted {
+		return nil
+	}
+
 	if header.Number == nil {
 		return errUnknownBlock
 	}
@@ -233,10 +238,8 @@ func (b *backend) verifySigner(chain consensus.ChainHeaderReader, header *types.
 	}
 
 	// Signer should be in the validator set of previous block's extraData.
-	if b.coreStarted {
-		if signer != b.leader {
-			return errUnauthorized
-		}
+	if signer != b.Leader() {
+		return errUnauthorized
 	}
 	return nil
 }
@@ -321,7 +324,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	header := block.Header()
 	number := header.Number.Uint64()
 	// Bail out if we're unauthorized to sign a block
-	if b.leader != b.address {
+	if b.Leader() != b.address {
 		return errUnauthorized
 	}
 
@@ -340,11 +343,8 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		head.Number = big.NewInt(19)
 		bl := types.NewBlock(head, nil, nil, nil, new(trie.Trie))
 		bl, _ = b.updateBlock(parent, bl)
-		if err = b.SendNewBlock(bl); err != nil {
-			return err
-		}
+		b.blockCh <- bl
 		results <- block
-		b.leader = b.validators[1]
 		return nil
 	}
 
@@ -354,17 +354,15 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	if status == 0 {
 		results <- block
 
-		if err = b.SendNewBlock(block); err != nil {
-			return err
-		}
+		b.blockCh <- block
 		b.logger.Info("[E2C] Successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
 	} else if status == 1 {
 		return nil
 	} else if status == 2 {
-		b.ch <- block
+		b.blockCh <- block
 		results <- block
 	} else if status == 3 {
-		b.ch <- block
+		b.blockCh <- block
 		results <- block
 	}
 	return nil
@@ -429,8 +427,8 @@ func (b *backend) Start(chain consensus.Chain) error {
 		return err
 	}
 	b.validators = e2cExtra.Validators
-	// @todo fix this to be the leader of block rather than always 0
-	b.leader = b.validators[0]
+	//@todo set view to whatever it should be
+	// How to know what it should be?
 
 	if err := b.core.Start(chain.GetBlock(header.Hash(), header.Number.Uint64())); err != nil {
 		return err

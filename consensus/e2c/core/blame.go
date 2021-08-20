@@ -2,8 +2,6 @@ package core
 
 import (
 	"time"
-
-	"github.com/ethereum/go-ethereum/consensus/e2c"
 )
 
 func (c *core) sendBlame() error {
@@ -12,9 +10,9 @@ func (c *core) sendBlame() error {
 		return nil
 	}
 
-	c.blame[c.backend.Address()] = &e2c.Message{}
+	c.blame[c.backend.Address()] = &Message{}
 
-	data, err := e2c.Encode(&e2c.Blame{
+	data, err := Encode(&Blame{
 		View: c.backend.View(),
 		// Block:     nil,
 		// BlockStar: nil,
@@ -23,8 +21,8 @@ func (c *core) sendBlame() error {
 		return err
 	}
 
-	c.broadcast(&e2c.Message{
-		Code: e2c.BlameMsgCode,
+	c.broadcast(&Message{
+		Code: BlameMsg,
 		Msg:  data,
 	})
 	return nil
@@ -32,30 +30,30 @@ func (c *core) sendBlame() error {
 
 func (c *core) sendBlameCertificate() error {
 
-	var blames []*e2c.Message
+	var blames []*Message
 	for _, m := range c.blame {
 		blames = append(blames, m)
 	}
 
-	msg, err := e2c.Encode(blames)
+	msg, err := Encode(blames)
 	if err != nil {
 		return err
 	}
 
-	c.broadcast(&e2c.Message{
-		Code: e2c.RBlameCertCode,
+	c.broadcast(&Message{
+		Code: BlameCertificateMsg,
 		Msg:  msg,
 	})
 	return nil
 }
 
-func (c *core) handleBlameMessage(msg *e2c.Message) bool {
+func (c *core) handleBlameMessage(msg *Message) bool {
 	// @todo maybe remove this?
-	if c.backend.Address() == c.backend.Leader() {
-		return false
-	}
+	//	if c.backend.Address() == c.backend.Leader() {
+	//		return false
+	//	}
 
-	var blame e2c.Blame
+	var blame Blame
 	if err := msg.Decode(&blame); err != nil {
 		c.logger.Error("Failed to decode blame message", "err", err)
 		return false
@@ -87,20 +85,20 @@ func (c *core) handleBlameMessage(msg *e2c.Message) bool {
 	return true
 }
 
-func (c *core) handleBlameCertificate(msg *e2c.Message) bool {
+func (c *core) handleBlameCertificate(msg *Message) bool {
 
 	if c.backend.Status() != 0 { // we are already changing view
 		return false
 	}
 
-	var cert e2c.BlameCert
+	var cert BlameCert
 	if err := msg.Decode(&cert); err != nil {
 		c.logger.Error("Failed to decode blame message", "err", err)
 		return false
 	}
 
 	for _, msg := range cert.Blames {
-		var blame e2c.Blame
+		var blame Blame
 		if err := msg.Decode(&msg); err != nil {
 			c.logger.Error("Invalid blame message contained in certificate", "err", err)
 			return false

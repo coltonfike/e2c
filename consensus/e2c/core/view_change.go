@@ -6,16 +6,20 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-// @todo do the memory clearing for blame arrays
+// @todo reset progress timer
 func (c *core) changeView() {
 
+	c.blame = make(map[common.Address]*Message)
+	c.validates = make(map[common.Address]*Message)
+	c.votes = make(map[common.Hash]map[common.Address]*Message)
+	c.progressTimer = NewProgressTimer(5 * c.config.Delta * time.Millisecond)
+
 	c.logger.Info("[E2C] Proposing blocks for voting", "committed number", c.committed.Number(), "committed hash", c.committed.Hash().String(), "lock number", c.lock.Number(), "lock hash", c.lock.Hash())
-	c.votes[c.committed.Hash()] = make(map[common.Address]*e2c.Message)
-	c.votes[c.lock.Hash()] = make(map[common.Address]*e2c.Message)
+	c.votes[c.committed.Hash()] = make(map[common.Address]*Message)
+	c.votes[c.lock.Hash()] = make(map[common.Address]*Message)
 
 	c.sendVote([]*types.Block{c.committed, c.lock})
 
@@ -27,14 +31,14 @@ func (c *core) changeView() {
 // @todo figure out how to send this with a list of signatures for each block so
 // i don't have to use 2 message objects
 func (c *core) sendVote(blocks []*types.Block) error {
-	votes := make([]*e2c.Message, len(blocks))
+	votes := make([]*Message, len(blocks))
 	for i, block := range blocks {
-		msg, err := e2c.Encode(block)
+		msg, err := Encode(block)
 		if err != nil {
 			return err
 		}
-		v := &e2c.Message{
-			Code:    e2c.VoteMsgCode,
+		v := &Message{
+			Code:    VoteMsg,
 			Msg:     msg,
 			Address: c.backend.Address(),
 		}
@@ -43,21 +47,21 @@ func (c *core) sendVote(blocks []*types.Block) error {
 		c.votes[block.Hash()][c.backend.Address()] = v
 	}
 
-	msg, err := e2c.Encode(votes)
+	msg, err := Encode(votes)
 	if err != nil {
 		return err
 	}
 
-	c.broadcast(&e2c.Message{
-		Code: e2c.VoteMsgCode,
+	c.broadcast(&Message{
+		Code: VoteMsg,
 		Msg:  msg,
 	})
 	return nil
 }
 
-func (c *core) handleVote(msg *e2c.Message) bool {
+func (c *core) handleVote(msg *Message) bool {
 
-	var votes []*e2c.Message
+	var votes []*Message
 	if err := msg.Decode(&votes); err != nil {
 		c.logger.Error("Failed to decode vote message", "err", err)
 		return false
@@ -99,44 +103,44 @@ func (c *core) handleVote(msg *e2c.Message) bool {
 
 func (c *core) sendBlockCertificate(block *types.Block) error {
 	if c.highestCert == nil || c.highestCert.Block.Number().Uint64() < block.Number().Uint64() {
-		var votes []*e2c.Message
+		var votes []*Message
 		for _, val := range c.votes[block.Hash()] {
 			votes = append(votes, val)
 		}
 
-		c.highestCert = &e2c.BlockCertificate{
+		c.highestCert = &BlockCertificate{
 			Block: block,
 			Votes: votes,
 		}
 
 		c.logger.Info("[E2C] New Highest Block is certified!", "number", block.Number(), "hash", block.Hash().String(), "votes", votes)
 
-		m, err := e2c.Encode(c.highestCert)
+		m, err := Encode(c.highestCert)
 		if err != nil {
 			return err
 		}
-		c.broadcast(&e2c.Message{
-			Code: e2c.BlockCertMsgCode,
+		c.broadcast(&Message{
+			Code: BlockCertificateMsg,
 			Msg:  m,
 		})
 	}
 	return nil
 }
 
-func (c *core) verifyBlockCertificate(bc *e2c.BlockCertificate) error {
+func (c *core) verifyBlockCertificate(bc *BlockCertificate) error {
 	if uint64(len(bc.Votes)) <= c.config.F {
 		return errors.New("not enough votes")
 	}
 	for _, m := range bc.Votes {
-		if err := m.VerifySig(); err != nil || m.Code != e2c.VoteMsgCode {
+		if err := m.VerifySig(); err != nil || m.Code != VoteMsg {
 			return errors.New("votes message invalid")
 		}
 	}
 	return nil
 }
 
-func (c *core) handleBlockCertificate(msg *e2c.Message) bool {
-	var bc *e2c.BlockCertificate
+func (c *core) handleBlockCertificate(msg *Message) bool {
+	var bc *BlockCertificate
 	if err := msg.Decode(&bc); err != nil {
 		c.logger.Error("Failed to decode block certificate", "err", err)
 		return false
@@ -170,24 +174,24 @@ func (c *core) sendFirstProposal() error {
 	}
 
 	c.backend.SetStatus(2)
-	block := <-c.ch
+	block := <-c.blockCh
 	c.backend.SetStatus(3)
 	c.logger.Info("[E2C] Proposing new block", "number", block.Number(), "hash", block.Hash().String(), "certificate", c.highestCert)
 	c.blockQueue = NewBlockQueue(c.config.Delta)
 
-	data, err := e2c.Encode(&e2c.B1{Cert: c.highestCert, Block: block})
+	data, err := Encode(&B1{Cert: c.highestCert, Block: block})
 	if err != nil {
 		return err
 	}
-	c.broadcast(&e2c.Message{
-		Code: e2c.NewBlockOneMsgCode,
+	c.broadcast(&Message{
+		Code: FirstProposalMsg,
 		Msg:  data,
 	})
 	return nil
 }
 
-func (c *core) handleFirstProposal(msg *e2c.Message) bool {
-	var b e2c.B1
+func (c *core) handleFirstProposal(msg *Message) bool {
+	var b B1
 	if err := msg.Decode(&b); err != nil {
 		c.logger.Error("Failed to decode first proposal", "err", err)
 		return false
@@ -204,6 +208,12 @@ func (c *core) handleFirstProposal(msg *e2c.Message) bool {
 		return false
 	}
 
+	// @todo FIX THIS VERIFY BECAUSE IT ALWAYS BLAMES
+	if err := c.verify(b.Block); err != nil {
+		c.logger.Warn("Blame sent", "err", err)
+		c.sendBlame()
+		return false
+	}
 	// @todo make this a standalone method so it isn't duplicated
 	for {
 		block, ok := c.blockQueue.getNext()
@@ -217,23 +227,18 @@ func (c *core) handleFirstProposal(msg *e2c.Message) bool {
 	}
 	c.blockQueue = NewBlockQueue(c.config.Delta)
 
-	// @todo fix this as it always blames
-	if err := c.verify(b.Block); err != nil {
-		c.logger.Warn("Blame sent", "err", err)
-		c.sendBlame()
-	}
 	c.blockQueue.insertHandled(b.Block)
 	c.lock = b.Block
 
-	data, err := e2c.Encode(time.Now())
+	data, err := Encode(time.Now())
 	if err != nil {
 		c.logger.Error("Failed to encode validate message")
 		return false
 	}
 
 	// @todo is this a broadcast or just send to leader?
-	c.send(&e2c.Message{
-		Code: e2c.ValidateMsgCode,
+	c.send(&Message{
+		Code: ValidateMsg,
 		Msg:  data,
 	}, c.backend.Leader())
 
@@ -243,7 +248,7 @@ func (c *core) handleFirstProposal(msg *e2c.Message) bool {
 }
 
 // @todo maybe broadcast these?
-func (c *core) handleValidate(msg *e2c.Message) bool {
+func (c *core) handleValidate(msg *Message) bool {
 	var t time.Time
 	if err := msg.Decode(&t); err != nil {
 		c.logger.Error("Failed to decode validate message", "err", err)
@@ -254,6 +259,7 @@ func (c *core) handleValidate(msg *e2c.Message) bool {
 	c.validates[msg.Address] = msg
 
 	// @todo replace with F, but can't now because node 1 dies when it's bad
+	// @todo maybe leader validates it's own message so that can get F sigs?
 	if uint64(len(c.validates)) == 2 {
 		if err := c.sendSecondProposal(); err != nil {
 			c.logger.Error("Failed to send second proposal", "err", err)
@@ -264,19 +270,19 @@ func (c *core) handleValidate(msg *e2c.Message) bool {
 }
 
 func (c *core) sendSecondProposal() error {
-	block := <-c.ch
+	block := <-c.blockCh
 
-	var validates []*e2c.Message
+	var validates []*Message
 	for _, val := range c.validates {
 		validates = append(validates, val)
 	}
 
-	data, err := e2c.Encode(&e2c.B2{Block: block, Validates: validates})
+	data, err := Encode(&B2{Block: block, Validates: validates})
 	if err != nil {
 		return err
 	}
-	c.broadcast(&e2c.Message{
-		Code: e2c.FinalBlockMsgCode,
+	c.broadcast(&Message{
+		Code: SecondProposalMsg,
 		Msg:  data,
 	})
 	c.logger.Info("[E2C] Sent proposal for second block in view", "number", block.Number(), "hash", block.Hash().String(), "validates", validates)
@@ -284,8 +290,8 @@ func (c *core) sendSecondProposal() error {
 	return nil
 }
 
-func (c *core) handleSecondProposal(msg *e2c.Message) bool {
-	var b e2c.B2
+func (c *core) handleSecondProposal(msg *Message) bool {
+	var b B2
 	if err := msg.Decode(&b); err != nil {
 		c.logger.Error("Failed to decode second proposal", "err", err)
 		return false
@@ -295,13 +301,14 @@ func (c *core) handleSecondProposal(msg *e2c.Message) bool {
 
 	// @todo check that each message is from different addr
 	// @todo change 2 to F when we get it working
+	// @todo maybe leader validates it's own message so that can get F sigs?
 	if uint64(len(b.Validates)) < 2 {
 		c.sendBlame()
 		c.logger.Warn("Blame sent", "err", "does not contain enough validates")
 		return false
 	}
 	for _, m := range b.Validates {
-		if err := m.VerifySig(); err != nil || m.Code != e2c.ValidateMsgCode {
+		if err := m.VerifySig(); err != nil || m.Code != ValidateMsg {
 			c.sendBlame()
 			c.logger.Warn("Blame sent", "err", "validates not valid")
 			return false
@@ -311,6 +318,7 @@ func (c *core) handleSecondProposal(msg *e2c.Message) bool {
 	if err := c.verify(b.Block); err != nil {
 		c.logger.Warn("Blame sent", "err", "invalid block")
 		c.sendBlame()
+		return false
 	}
 	c.blockQueue.insertHandled(b.Block)
 	c.lock = b.Block

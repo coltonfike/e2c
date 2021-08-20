@@ -5,13 +5,26 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-// @todo add view to this message
+func (c *core) propose(block *types.Block) error {
+	data, err := Encode(block)
+	if err != nil {
+		return err
+	}
 
-func (c *core) handleProposal(msg *e2c.Message) bool {
+	c.broadcast(&Message{
+		Code: NewBlockMsg,
+		Msg:  data,
+	})
+	c.lock = block
+	c.committed = block
+	return nil
+}
+
+// @todo add view to this message
+func (c *core) handleProposal(msg *Message) bool {
 
 	if c.backend.Address() == c.backend.Leader() { // leader doesn't do this process
 		return false

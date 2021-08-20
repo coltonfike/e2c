@@ -22,7 +22,6 @@ import (
 	"math/big"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -61,11 +60,11 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 		knownMessages:  knownMessages,
 		status:         0,
 		view:           0,
-		ch:             make(chan *types.Block),
+		blockCh:        make(chan *types.Block),
 		// @ todo add a timeout feature for clientBlocks
 		clientBlocks: make(map[common.Hash]uint64),
 	}
-	backend.core = e2cCore.New(backend, backend.config, backend.ch)
+	backend.core = e2cCore.New(backend, backend.config, backend.blockCh)
 	return backend
 }
 
@@ -76,7 +75,6 @@ type backend struct {
 	eventMux   *event.TypeMux
 	privateKey *ecdsa.PrivateKey
 	address    common.Address
-	leader     common.Address
 	// @todo only put this in genesis block?
 	validators  []common.Address
 	core        e2c.Engine
@@ -88,7 +86,7 @@ type backend struct {
 	status      uint32
 	view        uint64
 
-	ch chan *types.Block
+	blockCh chan *types.Block
 
 	// Snapshots for recent block to speed up reorgs
 	recents *lru.ARCCache
@@ -197,363 +195,6 @@ func (b *backend) Send(payload []byte, addr common.Address) error {
 	return nil
 }
 
-func (b *backend) SendBlockOne(block e2c.B1) error {
-
-	msg, err := Encode(&block)
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    newBlockOneMsgCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadWithSig(b.Sign)
-	if err != nil {
-		return err
-	}
-
-	go b.Broadcast(payload)
-	return nil
-}
-
-func (b *backend) SendFinal(block e2c.B2) error {
-
-	msg, err := Encode(&block)
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    finalBlockMsgCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadWithSig(b.Sign)
-	if err != nil {
-		return err
-	}
-
-	go b.Broadcast(payload)
-	return nil
-}
-
-func (b *backend) SendNewBlock(block *types.Block) error {
-
-	b.logger.Debug("Broadcasted new block", "number", block.Number().Uint64(), "hash", block.Hash())
-	msg, err := Encode(block)
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    newBlockMsgCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadWithSig(b.Sign)
-	if err != nil {
-		return err
-	}
-
-	go b.Broadcast(payload)
-	return nil
-}
-
-func (b *backend) RelayBlock(hash common.Hash) error {
-
-	b.logger.Debug("Relayed block", "hash", hash)
-	msg, err := Encode(hash)
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    relayMsgCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadNoSig()
-	if err != nil {
-		return err
-	}
-
-	go b.Broadcast(payload)
-	return nil
-}
-
-func (b *backend) SendBlame() error {
-
-	// @todo get this to not send the time
-	msg, err := Encode(time.Now())
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    blameMsgCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadWithSig(b.Sign)
-	if err != nil {
-		return err
-	}
-
-	go b.Broadcast(payload)
-	return nil
-}
-
-func (b *backend) SendValidate() error {
-
-	addr := b.Leader()
-	// @todo get this to not send the time
-	msg, err := Encode(time.Now())
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    validateMsgCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadWithSig(b.Sign)
-	if err != nil {
-		return err
-	}
-
-	hash := e2c.RLPHash(payload)
-	ps := b.broadcaster.PeerSet()
-	p, ok := ps[addr]
-	if !ok {
-		// @todo add this as real error
-		return errors.New("No peer with that address")
-	}
-	ms, ok := b.recentMessages.Get(addr)
-	var c *lru.ARCCache
-	if ok {
-		c, _ = ms.(*lru.ARCCache)
-		if _, k := c.Get(hash); k {
-			// This peer had this event, skip it
-			return nil
-		}
-	} else {
-		c, _ = lru.NewARC(inmemoryMessages)
-	}
-
-	c.Add(hash, true)
-	b.recentMessages.Add(addr, c)
-	go p.SendConsensus(e2cMsg, payload)
-	return nil
-}
-
-func (b *backend) SendBlameCertificate(bc e2c.BlameCertificate) error {
-
-	msg, err := Encode(&bc)
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    blameCertCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadWithSig(b.Sign)
-	if err != nil {
-		return err
-	}
-
-	go b.Broadcast(payload)
-	return nil
-}
-
-func (b *backend) SendVote(block *types.Block, addr common.Address) error {
-
-	msg, err := Encode(block)
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    voteMsgCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadWithSig(b.Sign)
-	if err != nil {
-		return err
-	}
-
-	hash := e2c.RLPHash(payload)
-	ps := b.broadcaster.PeerSet()
-	p, ok := ps[addr]
-	if !ok {
-		return errors.New("No peer with that address")
-	}
-	ms, ok := b.recentMessages.Get(addr)
-	var c *lru.ARCCache
-	if ok {
-		c, _ = ms.(*lru.ARCCache)
-		if _, k := c.Get(hash); k {
-			// This peer had this event, skip it
-			return nil
-		}
-	} else {
-		c, _ = lru.NewARC(inmemoryMessages)
-	}
-
-	c.Add(hash, true)
-	b.recentMessages.Add(addr, c)
-	go p.SendConsensus(e2cMsg, payload)
-	return nil
-}
-
-func (b *backend) SendBlockCert(block *types.Block) error {
-	addr := b.Leader()
-	msg, err := Encode(block)
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    blockCertMsgCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadWithSig(b.Sign)
-	if err != nil {
-		return err
-	}
-
-	hash := e2c.RLPHash(payload)
-	ps := b.broadcaster.PeerSet()
-	p, ok := ps[addr]
-	if !ok {
-		return errors.New("No peer with that address")
-	}
-	ms, ok := b.recentMessages.Get(addr)
-	var c *lru.ARCCache
-	if ok {
-		c, _ = ms.(*lru.ARCCache)
-		if _, k := c.Get(hash); k {
-			// This peer had this event, skip it
-			return nil
-		}
-	} else {
-		c, _ = lru.NewARC(inmemoryMessages)
-	}
-
-	c.Add(hash, true)
-	b.recentMessages.Add(addr, c)
-	go p.SendConsensus(e2cMsg, payload)
-	return nil
-}
-
-func (b *backend) RequestBlock(hash common.Hash, addr common.Address) error {
-
-	b.logger.Info("Requesting block", "hash", hash, "addr", addr)
-	msg, err := Encode(hash)
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    requestBlockMsgCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadNoSig()
-	if err != nil {
-		return err
-	}
-
-	// they are asking for the block from everyo39Kne
-	if addr == (common.Address{}) {
-		go b.Broadcast(payload)
-	} else { // requesting from a specific address
-		hash := e2c.RLPHash(payload)
-		ps := b.broadcaster.PeerSet()
-		p, ok := ps[addr]
-		if !ok {
-			// @todo add error for this
-			return errors.New("No peer with that address")
-		}
-		ms, ok := b.recentMessages.Get(addr)
-		var m *lru.ARCCache
-		if ok {
-			m, _ = ms.(*lru.ARCCache)
-			if _, k := m.Get(hash); k {
-				// This peer had this event, skip it
-				return nil
-			}
-		} else {
-			m, _ = lru.NewARC(inmemoryMessages)
-		}
-
-		m.Add(hash, true)
-		b.recentMessages.Add(addr, m)
-		go p.SendConsensus(e2cMsg, payload)
-	}
-	return nil
-}
-
-func (b *backend) RespondToRequest(block *types.Block, addr common.Address) error {
-
-	b.logger.Debug("Responding to request for block", "number", block.Number().Uint64(), "hash", block.Hash(), "addr", addr)
-
-	msg, err := Encode(block)
-	if err != nil {
-		return err
-	}
-
-	m := &message{
-		Code:    respondToRequestMsgCode,
-		Msg:     msg,
-		Address: b.address,
-	}
-
-	payload, err := m.PayloadNoSig()
-	if err != nil {
-		return err
-	}
-
-	hash := e2c.RLPHash(payload)
-	ps := b.broadcaster.PeerSet()
-	p, ok := ps[addr]
-	if !ok {
-		return errors.New("No peer with that address")
-	}
-	ms, ok := b.recentMessages.Get(addr)
-	var c *lru.ARCCache
-	if ok {
-		c, _ = ms.(*lru.ARCCache)
-		if _, k := c.Get(hash); k {
-			// This peer had this event, skip it
-			return nil
-		}
-	} else {
-		c, _ = lru.NewARC(inmemoryMessages)
-	}
-
-	c.Add(hash, true)
-	b.recentMessages.Add(addr, c)
-	go p.SendConsensus(e2cMsg, payload)
-	return nil
-}
-
 // Commit implements e2c.Backend.Commit
 func (b *backend) Commit(block *types.Block) {
 	b.broadcaster.Enqueue(fetcherID, block)
@@ -588,7 +229,6 @@ func (b *backend) Verify(block *types.Block) error {
 func (b *backend) ChangeView() {
 	b.SetStatus(1)
 	b.view++
-	b.leader = b.Leader()
 	b.logger.Info("View change has been triggered", "leader", b.Leader())
 }
 
