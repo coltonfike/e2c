@@ -2,6 +2,8 @@ package core
 
 import (
 	"time"
+
+	"github.com/ethereum/go-ethereum/consensus/e2c"
 )
 
 func (c *core) sendBlame() error {
@@ -12,18 +14,10 @@ func (c *core) sendBlame() error {
 
 	c.blame[c.backend.Address()] = &Message{}
 
-	data, err := Encode(&Blame{
-		View: c.backend.View(),
-		// Block:     nil,
-		// BlockStar: nil,
-	})
-	if err != nil {
-		return err
-	}
+	// @todo send equivocating blocks?
 
 	c.broadcast(&Message{
 		Code: BlameMsg,
-		Msg:  data,
 	})
 	return nil
 }
@@ -48,22 +42,11 @@ func (c *core) sendBlameCertificate() error {
 }
 
 func (c *core) handleBlameMessage(msg *Message) bool {
-	// @todo maybe remove this?
-	//	if c.backend.Address() == c.backend.Leader() {
-	//		return false
-	//	}
 
-	var blame Blame
-	if err := msg.Decode(&blame); err != nil {
-		c.logger.Error("Failed to decode blame message", "err", err)
+	if msg.View != c.backend.View() { // blame for different view
 		return false
 	}
 
-	/*
-		if blame.View != c.backend.View() { // blame for different view
-			return false
-		}
-	*/
 	// @todo do checking of blocks on equivocation if necessary?
 
 	c.blame[msg.Address] = msg // add this message to our blame map
@@ -71,7 +54,7 @@ func (c *core) handleBlameMessage(msg *Message) bool {
 	c.logger.Info("[E2C] Blame message received", "addr", msg.Address, "total blame", len(c.blame))
 
 	if uint64(len(c.blame)) > c.config.F {
-		if c.backend.Status() != 0 { // we are already changing view
+		if c.backend.Status() != e2c.SteadyState { // we are already changing view
 			return false
 		}
 		if err := c.sendBlameCertificate(); err != nil {
@@ -87,7 +70,7 @@ func (c *core) handleBlameMessage(msg *Message) bool {
 
 func (c *core) handleBlameCertificate(msg *Message) bool {
 
-	if c.backend.Status() != 0 { // we are already changing view
+	if c.backend.Status() != e2c.SteadyState { // we are already changing view
 		return false
 	}
 

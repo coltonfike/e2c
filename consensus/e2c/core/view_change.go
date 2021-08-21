@@ -6,16 +6,17 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-// @todo reset progress timer
 func (c *core) changeView() {
 
 	c.blame = make(map[common.Address]*Message)
 	c.validates = make(map[common.Address]*Message)
 	c.votes = make(map[common.Hash]map[common.Address]*Message)
-	c.progressTimer = NewProgressTimer(5 * c.config.Delta * time.Millisecond)
+	c.progressTimer = NewProgressTimer(c.config.Delta * time.Millisecond) // @todo How to reset this properly? what should timer be reset to? 4 blames on occasion
+	c.progressTimer.AddDuration(4)
 
 	c.logger.Info("[E2C] Proposing blocks for voting", "committed number", c.committed.Number(), "committed hash", c.committed.Hash().String(), "lock number", c.lock.Number(), "lock hash", c.lock.Hash())
 	c.votes[c.committed.Hash()] = make(map[common.Address]*Message)
@@ -173,9 +174,9 @@ func (c *core) sendFirstProposal() error {
 		}
 	}
 
-	c.backend.SetStatus(2)
+	c.backend.SetStatus(e2c.FirstProposal)
 	block := <-c.blockCh
-	c.backend.SetStatus(3)
+	c.backend.SetStatus(e2c.SecondProposal)
 	c.logger.Info("[E2C] Proposing new block", "number", block.Number(), "hash", block.Hash().String(), "certificate", c.highestCert)
 	c.blockQueue = NewBlockQueue(c.config.Delta)
 
@@ -230,30 +231,18 @@ func (c *core) handleFirstProposal(msg *Message) bool {
 	c.blockQueue.insertHandled(b.Block)
 	c.lock = b.Block
 
-	data, err := Encode(time.Now())
-	if err != nil {
-		c.logger.Error("Failed to encode validate message")
-		return false
-	}
-
 	// @todo is this a broadcast or just send to leader?
 	c.send(&Message{
 		Code: ValidateMsg,
-		Msg:  data,
 	}, c.backend.Leader())
 
-	c.backend.SetStatus(2)
+	c.backend.SetStatus(e2c.SecondProposal)
 	c.logger.Info("[E2C] Sending validate for first block in view", "number", b.Block.Number(), "hash", b.Block.Hash().String())
 	return true
 }
 
 // @todo maybe broadcast these?
 func (c *core) handleValidate(msg *Message) bool {
-	var t time.Time
-	if err := msg.Decode(&t); err != nil {
-		c.logger.Error("Failed to decode validate message", "err", err)
-		return false
-	}
 
 	c.logger.Info("[E2C] Received validate message", "addr", msg.Address)
 	c.validates[msg.Address] = msg
@@ -286,7 +275,7 @@ func (c *core) sendSecondProposal() error {
 		Msg:  data,
 	})
 	c.logger.Info("[E2C] Sent proposal for second block in view", "number", block.Number(), "hash", block.Hash().String(), "validates", validates)
-	c.backend.SetStatus(0)
+	c.backend.SetStatus(e2c.SteadyState)
 	return nil
 }
 
@@ -322,7 +311,7 @@ func (c *core) handleSecondProposal(msg *Message) bool {
 	}
 	c.blockQueue.insertHandled(b.Block)
 	c.lock = b.Block
-	c.backend.SetStatus(0)
+	c.backend.SetStatus(e2c.SteadyState)
 	c.logger.Info("[E2C] View Change completed! Resuming normal operations")
 	return true
 }

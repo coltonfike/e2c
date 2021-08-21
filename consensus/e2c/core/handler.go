@@ -47,7 +47,7 @@ func (c *core) loop() {
 				c.logger.Error("Failed to propose new block", "err", err)
 			}
 		case <-c.blockQueue.c():
-			if c.backend.Status() != 1 {
+			if c.backend.Status() != e2c.VotePhase {
 				if block, ok := c.blockQueue.getNext(); ok {
 					c.commit(block)
 				}
@@ -59,7 +59,7 @@ func (c *core) loop() {
 				c.logger.Info("[E2C] Progress Timer expired! Sending Blame message!")
 			}
 		case <-c.certTimer.C:
-			if c.backend.Status() == 1 {
+			if c.backend.Status() == e2c.VotePhase {
 				if err := c.sendFirstProposal(); err != nil {
 					c.logger.Error("Failed to encode block certificate", "err", err)
 				}
@@ -71,8 +71,12 @@ func (c *core) loop() {
 func (c *core) handleMsg(msg *Message) bool {
 	// @todo check message came from one of validators
 
+	if err := c.verifyMsg(msg); err != nil {
+		c.logger.Error("Failed to verify message", "err", err)
+		return false
+	}
+
 	switch msg.Code {
-	// @todo add a case for received blamecert
 	case NewBlockMsg:
 		return c.handleProposal(msg)
 

@@ -72,7 +72,7 @@ func (c *core) handleResponse(msg *Message) bool {
 	}
 	c.logger.Info("Response to request received", "number", block.Number().Uint64(), "hash", block.Hash(), "from", msg.Address)
 
-	if err := c.handleBlock(block); err != nil {
+	if err := c.handleBlock(block); err != nil && err != errRequestingBlock {
 		c.logger.Error("Failed to handle block", "err", err)
 		return false
 	}

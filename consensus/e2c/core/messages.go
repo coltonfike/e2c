@@ -18,6 +18,7 @@ package core
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 
@@ -42,6 +43,7 @@ const (
 type Message struct {
 	Code      uint64
 	Msg       []byte
+	View      uint64
 	Address   common.Address
 	Signature []byte
 }
@@ -52,7 +54,7 @@ type Message struct {
 
 // EncodeRLP serializes m into the Ethereum RLP format.
 func (m *Message) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, []interface{}{m.Code, m.Msg, m.Address, m.Signature})
+	return rlp.Encode(w, []interface{}{m.Code, m.Msg, m.View, m.Address, m.Signature})
 }
 
 // DecodeRLP implements rlp.Decoder, and load the consensus fields from a RLP stream.
@@ -60,6 +62,7 @@ func (m *Message) DecodeRLP(s *rlp.Stream) error {
 	var msg struct {
 		Code      uint64
 		Msg       []byte
+		View      uint64
 		Address   common.Address
 		Signature []byte
 	}
@@ -67,7 +70,7 @@ func (m *Message) DecodeRLP(s *rlp.Stream) error {
 	if err := s.Decode(&msg); err != nil {
 		return err
 	}
-	m.Code, m.Msg, m.Address, m.Signature = msg.Code, msg.Msg, msg.Address, msg.Signature
+	m.Code, m.Msg, m.View, m.Address, m.Signature = msg.Code, msg.Msg, msg.View, msg.Address, msg.Signature
 	return nil
 }
 
@@ -123,7 +126,8 @@ func (m *Message) PayloadNoSig() ([]byte, error) {
 	return rlp.EncodeToBytes(&Message{
 		Code:      m.Code,
 		Msg:       m.Msg,
-		Address:   m.Address,
+		View:      m.View,
+		Address:   m.Address, // @todo when changing to more memory efficient signing, make this empty
 		Signature: []byte{},
 	})
 }
@@ -145,4 +149,12 @@ func (m *Message) String() string {
 
 func Encode(val interface{}) ([]byte, error) {
 	return rlp.EncodeToBytes(val)
+}
+
+func (c *core) verifyMsg(msg *Message) error {
+	if msg.View != c.backend.View() && !(msg.Code == RequestBlockMsg || msg.Code == RespondMsg) {
+		return errors.New("msg from different view")
+	}
+	// @todo check message came from validators
+	return nil
 }

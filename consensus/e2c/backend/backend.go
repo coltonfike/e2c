@@ -227,7 +227,7 @@ func (b *backend) Verify(block *types.Block) error {
 }
 
 func (b *backend) ChangeView() {
-	b.SetStatus(1)
+	b.SetStatus(e2c.VotePhase)
 	b.view++
 	b.logger.Info("View change has been triggered", "leader", b.Leader())
 }

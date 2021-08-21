@@ -20,7 +20,6 @@ import (
 	"errors"
 	"math/big"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -69,20 +68,17 @@ type core struct {
 	backend        e2c.Backend
 	eventMux       *event.TypeMuxSubscription
 
-	handlerWg    *sync.WaitGroup
-	lock         *types.Block
-	committed    *types.Block
-	highestCert  *BlockCertificate
-	certReceived uint32
-	viewChange   uint32
+	handlerWg   *sync.WaitGroup
+	lock        *types.Block
+	committed   *types.Block
+	highestCert *BlockCertificate
 }
 
 func (c *core) Start(block *types.Block) error {
 	c.lock = block
-	c.progressTimer = NewProgressTimer(4 * c.config.Delta * time.Millisecond)
+	c.progressTimer = NewProgressTimer(c.config.Delta * time.Millisecond)
 	c.certTimer = time.NewTimer(1 * time.Millisecond)
 	c.subscribeEvents()
-	atomic.StoreUint32(&c.viewChange, 0)
 	go c.loop()
 	return nil
 }
@@ -138,6 +134,7 @@ func (c *core) commit(block *types.Block) {
 
 func (c *core) finalizeMessage(msg *Message) ([]byte, error) {
 	msg.Address = c.backend.Address()
+	msg.View = c.backend.View()
 
 	data, err := msg.PayloadWithSig(c.backend.Sign)
 	if err != nil {

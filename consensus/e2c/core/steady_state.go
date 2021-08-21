@@ -1,11 +1,16 @@
 package core
 
 import (
-	"time"
+	"errors"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
+)
+
+var (
+	errRequestingBlock = errors.New("requesting block")
 )
 
 func (c *core) propose(block *types.Block) error {
@@ -23,13 +28,12 @@ func (c *core) propose(block *types.Block) error {
 	return nil
 }
 
-// @todo add view to this message
 func (c *core) handleProposal(msg *Message) bool {
 
 	if c.backend.Address() == c.backend.Leader() { // leader doesn't do this process
 		return false
 	}
-	if c.backend.Status() == 1 { // we are currently changing view, ignore all messages
+	if c.backend.Status() != e2c.SteadyState { // we are currently changing view, ignore all messages
 		return false
 	}
 	if msg.Address != c.backend.Leader() { // message didn't come from leader
@@ -60,7 +64,7 @@ func (c *core) handleBlock(block *types.Block) error {
 				c.logger.Error("Failed to send request", "err", err)
 				return err
 			}
-			return nil
+			return errRequestingBlock // this is necessary to signal an if statement in request that this block wasn't committed
 		} else {
 			c.logger.Warn("[E2C] Sending Blame", "err", err, "number", block.Number())
 			c.sendBlame()
@@ -69,7 +73,7 @@ func (c *core) handleBlock(block *types.Block) error {
 	}
 
 	c.logger.Info("[E2C] Valid block received", "number", block.Number().Uint64(), "hash", block.Hash())
-	c.progressTimer.AddDuration(2 * c.config.Delta * time.Millisecond)
+	c.progressTimer.AddDuration(2)
 
 	c.blockQueue.insertHandled(block)
 	c.lock = block

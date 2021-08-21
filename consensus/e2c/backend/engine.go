@@ -223,7 +223,7 @@ func (b *backend) VerifyUncles(chain consensus.ChainReader, block *types.Block) 
 // verifySigner checks whether the signer is the leader
 func (b *backend) verifySigner(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
 	// Verifying the genesis block is not supported
-	if b.Status() != 0 {
+	if b.Status() != e2c.SteadyState { // this is here because block signer was of previous view, block should have already been verified so we can skip this step
 		return nil
 	}
 	number := header.Number.Uint64()
@@ -351,17 +351,17 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	// delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
 
 	status := b.Status()
-	if status == 0 {
+	if status == e2c.SteadyState {
 		results <- block
 
 		b.blockCh <- block
 		b.logger.Info("[E2C] Successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
-	} else if status == 1 {
+	} else if status == e2c.VotePhase {
 		return nil
-	} else if status == 2 {
+	} else if status == e2c.FirstProposal {
 		b.blockCh <- block
 		results <- block
-	} else if status == 3 {
+	} else if status == e2c.SecondProposal {
 		b.blockCh <- block
 		results <- block
 	}

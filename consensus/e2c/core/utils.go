@@ -141,19 +141,20 @@ func (bq *blockQueue) clear() {
 type ProgressTimer struct {
 	timer *time.Timer
 	end   time.Time
+	delta time.Duration
 }
 
 func NewProgressTimer(t time.Duration) *ProgressTimer {
-	return &ProgressTimer{time.NewTimer(t), time.Now().Add(t)}
+	return &ProgressTimer{time.NewTimer(4 * t), time.Now().Add(t), t}
 }
 
 func (pt *ProgressTimer) Reset(t time.Duration) {
-	pt.timer.Reset(t)
-	pt.end = time.Now().Add(t)
+	pt.timer.Reset(t * pt.delta)
+	pt.end = time.Now().Add(t * pt.delta)
 }
 
 func (pt *ProgressTimer) AddDuration(t time.Duration) {
-	d := time.Until(pt.end) + t
+	d := time.Until(pt.end) + t*pt.delta
 	pt.timer.Reset(d)
 	pt.end = time.Now().Add(d)
 }

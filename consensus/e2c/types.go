@@ -16,6 +16,13 @@
 
 package e2c
 
+const (
+	SteadyState uint32 = iota
+	VotePhase
+	FirstProposal
+	SecondProposal
+)
+
 // MessageEvent is posted for E2C engine communication
 type MessageEvent struct {
 	Payload []byte
