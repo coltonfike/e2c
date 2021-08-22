@@ -89,7 +89,7 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		if b.coreStarted {
 			return true, nil
 		}
-		// @todo wait for so many acks before committing
+
 		var request struct {
 			Block *types.Block
 			TD    *big.Int
@@ -104,8 +104,12 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			b.clientBlocks[request.Block.Hash()] = 1
 		}
 
-		// @todo there is a bug here on view change
 		b.logger.Info("[E2C] Block acknowledgement received", "number", request.Block.Number(), "hash", request.Block.Hash(), "total acks", b.clientBlocks[request.Block.Hash()])
+		// @todo we would like to use b.F() and to check these messages came from out validator set, but I don't know how to get that information
+		// to the client. This code doesn't get access to the chain, only validator nodes get that, and because we don't have access to the chain
+		// we can't get access to the genesis block which has the list of validators. I'm sure there is a way to get that information to the client
+		// but I have looked for about 5 hours and can't find it, so I'm letting a network weakness exist for clients and using an extra field in the config
+		// to work around it until I find a solution
 		if b.clientBlocks[request.Block.Hash()] == b.config.F+1 {
 			b.Commit(request.Block)
 

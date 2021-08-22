@@ -169,3 +169,7 @@ func (c *core) send(msg *Message, addr common.Address) {
 		return
 	}
 }
+
+func (c *core) checkValidatorSignature(data []byte, sig []byte) (common.Address, error) {
+	return e2c.CheckValidatorSignature(c.backend.Validators(), data, sig)
+}

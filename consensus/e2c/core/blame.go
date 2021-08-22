@@ -53,7 +53,7 @@ func (c *core) handleBlameMessage(msg *Message) bool {
 
 	c.logger.Info("[E2C] Blame message received", "addr", msg.Address, "total blame", len(c.blame))
 
-	if uint64(len(c.blame)) > c.config.F {
+	if uint64(len(c.blame)) == c.backend.F()+1 {
 		if c.backend.Status() != e2c.SteadyState { // we are already changing view
 			return false
 		}

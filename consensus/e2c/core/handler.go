@@ -35,7 +35,7 @@ func (c *core) loop() {
 			switch ev := event.Data.(type) {
 			case e2c.MessageEvent:
 				msg := new(Message)
-				if err := msg.FromPayload(ev.Payload); err != nil {
+				if err := msg.FromPayload(ev.Payload, c.checkValidatorSignature); err != nil {
 					c.logger.Error("Failed to decode message", "err", err)
 				} else if c.handleMsg(msg) {
 					c.backend.Broadcast(ev.Payload)

@@ -76,7 +76,7 @@ type backend struct {
 	privateKey *ecdsa.PrivateKey
 	address    common.Address
 	// @todo only put this in genesis block?
-	validators  []common.Address
+	validators  e2c.Validators
 	core        e2c.Engine
 	logger      log.Logger
 	db          ethdb.Database
@@ -111,6 +111,14 @@ func (b *backend) Address() common.Address {
 // Validators implements e2c.Backend.Validators
 func (b *backend) Leader() common.Address {
 	return b.validators[b.view%uint64(len(b.validators))]
+}
+
+func (b *backend) Validators() e2c.Validators {
+	return b.validators
+}
+
+func (b *backend) F() uint64 {
+	return b.validators.F()
 }
 
 func (b *backend) View() uint64 {

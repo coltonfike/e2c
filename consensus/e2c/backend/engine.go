@@ -350,6 +350,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 
 	// delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
 
+	// @todo good chance this is the source of the lost block bug
 	status := b.Status()
 	if status == e2c.SteadyState {
 		results <- block

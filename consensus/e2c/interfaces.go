@@ -29,6 +29,8 @@ type Backend interface {
 
 	// Returns the current Leader
 	Leader() common.Address
+	Validators() Validators
+	F() uint64
 	Status() uint32
 	SetStatus(uint32)
 	View() uint64
@@ -37,7 +39,7 @@ type Backend interface {
 	EventMux() *event.TypeMux
 
 	// Broadcast sends a message to all peers
-	Broadcast(payload []byte) error
+	Broadcast([]byte) error
 	Send([]byte, common.Address) error
 
 	Commit(*types.Block)

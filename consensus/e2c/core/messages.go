@@ -23,7 +23,6 @@ import (
 	"io"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -78,17 +77,17 @@ func (m *Message) DecodeRLP(s *rlp.Stream) error {
 //
 // define the functions that needs to be provided for core.
 
-func (m *Message) FromPayload(b []byte) error {
+func (m *Message) FromPayload(b []byte, validateFn func([]byte, []byte) (common.Address, error)) error {
 	// Decode Message
 	err := rlp.DecodeBytes(b, &m)
 	if err != nil {
 		return err
 	}
 
-	return m.VerifySig()
+	return m.VerifySig(validateFn)
 }
 
-func (m *Message) VerifySig() (err error) {
+func (m *Message) VerifySig(validateFn func([]byte, []byte) (common.Address, error)) (err error) {
 	// Validate Message (on a Message without Signature)
 	var payload []byte
 	payload, err = m.PayloadNoSig()
@@ -96,12 +95,13 @@ func (m *Message) VerifySig() (err error) {
 		return err
 	}
 
-	addr, err := e2c.GetSignatureAddress(payload, m.Signature)
+	addr, err := validateFn(payload, m.Signature)
 	if err != nil {
 		return err
 	}
 	if !bytes.Equal(addr.Bytes(), m.Address.Bytes()) {
-		return err
+		return errors.New("invalid signer")
+		//return errInvalidSigner @todo add this error
 	}
 	return nil
 }

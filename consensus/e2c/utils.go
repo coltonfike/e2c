@@ -19,6 +19,7 @@ package e2c
 import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"golang.org/x/crypto/sha3"
 )
@@ -40,4 +41,19 @@ func GetSignatureAddress(data []byte, sig []byte) (common.Address, error) {
 		return common.Address{}, err
 	}
 	return crypto.PubkeyToAddress(*pubkey), nil
+}
+
+func CheckValidatorSignature(validators Validators, data []byte, sig []byte) (common.Address, error) {
+	signer, err := GetSignatureAddress(data, sig)
+	if err != nil {
+		log.Error("Failed to get signer address", "err", err)
+		return common.Address{}, err
+	}
+
+	// 2. Check validator
+	if _, val := validators.GetByAddress(signer); val != (common.Address{}) {
+		return val, nil
+	}
+
+	return common.Address{}, ErrUnauthorizedAddress
 }

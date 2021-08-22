@@ -88,12 +88,12 @@ func (c *core) handleVote(msg *Message) bool {
 	}
 	c.sendVote(myVotes)
 
-	if uint64(len(c.votes[c.committed.Hash()])) > c.config.F {
+	if uint64(len(c.votes[c.committed.Hash()])) == c.backend.F()+1 {
 		if err := c.sendBlockCertificate(c.committed); err != nil {
 			c.logger.Error("Failed to send block certificate", "err", err)
 		}
 	}
-	if uint64(len(c.votes[c.lock.Hash()])) > c.config.F {
+	if uint64(len(c.votes[c.lock.Hash()])) == c.backend.F()+1 {
 		if err := c.sendBlockCertificate(c.lock); err != nil {
 			c.logger.Error("Failed to send block certificate", "err", err)
 		}
@@ -129,11 +129,11 @@ func (c *core) sendBlockCertificate(block *types.Block) error {
 }
 
 func (c *core) verifyBlockCertificate(bc *BlockCertificate) error {
-	if uint64(len(bc.Votes)) <= c.config.F {
+	if uint64(len(bc.Votes)) <= c.backend.F() {
 		return errors.New("not enough votes")
 	}
 	for _, m := range bc.Votes {
-		if err := m.VerifySig(); err != nil || m.Code != VoteMsg {
+		if err := m.VerifySig(c.checkValidatorSignature); err != nil || m.Code != VoteMsg {
 			return errors.New("votes message invalid")
 		}
 	}
@@ -188,6 +188,13 @@ func (c *core) sendFirstProposal() error {
 		Code: FirstProposalMsg,
 		Msg:  data,
 	})
+
+	m := &Message{Code: ValidateMsg}
+	if _, err := c.finalizeMessage(m); err != nil {
+		c.logger.Error("Failed to create validate msg")
+	}
+	c.validates[m.Address] = m
+
 	return nil
 }
 
@@ -247,9 +254,7 @@ func (c *core) handleValidate(msg *Message) bool {
 	c.logger.Info("[E2C] Received validate message", "addr", msg.Address)
 	c.validates[msg.Address] = msg
 
-	// @todo replace with F, but can't now because node 1 dies when it's bad
-	// @todo maybe leader validates it's own message so that can get F sigs?
-	if uint64(len(c.validates)) == 2 {
+	if uint64(len(c.validates)) == c.backend.F()+1 {
 		if err := c.sendSecondProposal(); err != nil {
 			c.logger.Error("Failed to send second proposal", "err", err)
 			return false
@@ -297,7 +302,7 @@ func (c *core) handleSecondProposal(msg *Message) bool {
 		return false
 	}
 	for _, m := range b.Validates {
-		if err := m.VerifySig(); err != nil || m.Code != ValidateMsg {
+		if err := m.VerifySig(c.checkValidatorSignature); err != nil || m.Code != ValidateMsg {
 			c.sendBlame()
 			c.logger.Warn("Blame sent", "err", "validates not valid")
 			return false
