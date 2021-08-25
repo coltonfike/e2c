@@ -18,7 +18,6 @@ package core
 
 import (
 	"errors"
-	"math/big"
 	"sync"
 	"time"
 
@@ -29,22 +28,18 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-// @todo bug where we commit a block and delete from queue, then receive the next block before fetcher has had time to add to chain
-// solution: delete block when new head event is triggered?
-
 // New creates an E2C consensus core
 func New(backend e2c.Backend, config *e2c.Config, ch chan *types.Block) e2c.Engine {
 	c := &core{
-		config:         config,
-		handlerWg:      new(sync.WaitGroup),
-		logger:         log.New(),
-		backend:        backend,
-		blockQueue:     NewBlockQueue(config.Delta),
-		expectedHeight: big.NewInt(0),
-		blockCh:        ch,
-		blame:          make(map[common.Address]*Message),
-		validates:      make(map[common.Address]*Message),
-		votes:          make(map[common.Hash]map[common.Address]*Message),
+		config:     config,
+		handlerWg:  new(sync.WaitGroup),
+		logger:     log.New(),
+		backend:    backend,
+		blockQueue: NewBlockQueue(config.Delta),
+		blockCh:    ch,
+		blame:      make(map[common.Address]*Message),
+		validates:  make(map[common.Address]*Message),
+		votes:      make(map[common.Hash]map[common.Address]*Message),
 	}
 
 	return c
@@ -53,42 +48,51 @@ func New(backend e2c.Backend, config *e2c.Config, ch chan *types.Block) e2c.Engi
 // ----------------------------------------------------------------------------
 
 type core struct {
-	config        *e2c.Config
-	logger        log.Logger
-	blockCh       chan *types.Block
-	progressTimer *ProgressTimer
-	certTimer     *time.Timer
+	config  *e2c.Config
+	logger  log.Logger
+	blockCh chan *types.Block
 
+	progressTimer *ProgressTimer // tracks the progress of leader
+	certTimer     *time.Timer    // this is only used in view change to wait the 4 delta
+
+	// Data structures for core
 	blockQueue *blockQueue
 	blame      map[common.Address]*Message
 	validates  map[common.Address]*Message
 	votes      map[common.Hash]map[common.Address]*Message
 
-	expectedHeight *big.Int
-	backend        e2c.Backend
-	eventMux       *event.TypeMuxSubscription
+	backend   e2c.Backend
+	eventMux  *event.TypeMuxSubscription
+	handlerWg *sync.WaitGroup
 
-	handlerWg   *sync.WaitGroup
 	lock        *types.Block
 	committed   *types.Block
 	highestCert *BlockCertificate
 }
 
+// initializes data
 func (c *core) Start(block *types.Block) error {
 	c.lock = block
 	c.progressTimer = NewProgressTimer(c.config.Delta * time.Millisecond)
 	c.certTimer = time.NewTimer(1 * time.Millisecond)
 	c.subscribeEvents()
+
+	// start event loop
 	go c.loop()
 	return nil
 }
 
+// clears memory and forces loop to stop
 func (c *core) Stop() error {
 	c.unsubscribeEvents()
 	c.handlerWg.Wait()
 	return nil
 }
 
+// this will search our data structures for the block. It's called by VerifyHeader in backend
+// it shouldn't cause any race conditions as the call for this only exists in an if inside VerifyHeader.
+// that if only executes if the caller to VerifyHeader was the core event loop, which means there won't be
+// concurrent access
 func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
 	b, ok := c.blockQueue.get(hash)
 	if ok {
@@ -100,20 +104,19 @@ func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
 	return nil, errors.New("unknown block")
 }
 
-func (c *core) Lock() *types.Block {
-	return c.lock
-}
-
+// adds the event to the eventmux
 func (c *core) subscribeEvents() {
 	c.eventMux = c.backend.EventMux().Subscribe(
 		e2c.MessageEvent{},
 	)
 }
 
+// clear events from eventmux
 func (c *core) unsubscribeEvents() {
 	c.eventMux.Unsubscribe()
 }
 
+// check that blocks are valid
 func (c *core) verify(block *types.Block) error {
 	if err := c.backend.Verify(block); err != nil {
 		return err
@@ -125,6 +128,7 @@ func (c *core) verify(block *types.Block) error {
 	return nil
 }
 
+// add the block to the chain
 func (c *core) commit(block *types.Block) {
 
 	c.backend.Commit(block)
@@ -132,6 +136,7 @@ func (c *core) commit(block *types.Block) {
 	c.logger.Info("[E2C] Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())
 }
 
+// this signs the message and adds the view and addess to the packet
 func (c *core) finalizeMessage(msg *Message) ([]byte, error) {
 	msg.Address = c.backend.Address()
 	msg.View = c.backend.View()
@@ -144,6 +149,7 @@ func (c *core) finalizeMessage(msg *Message) ([]byte, error) {
 	return data, nil
 }
 
+// sends the message to all nodes
 func (c *core) broadcast(msg *Message) {
 	payload, err := c.finalizeMessage(msg)
 	if err != nil {
@@ -157,6 +163,7 @@ func (c *core) broadcast(msg *Message) {
 	}
 }
 
+// sends message to a single node
 func (c *core) send(msg *Message, addr common.Address) {
 	payload, err := c.finalizeMessage(msg)
 	if err != nil {
@@ -170,6 +177,7 @@ func (c *core) send(msg *Message, addr common.Address) {
 	}
 }
 
+// this is a helper method that is used by core/messages.go to verify the signature came from a validator
 func (c *core) checkValidatorSignature(data []byte, sig []byte) (common.Address, error) {
 	return e2c.CheckValidatorSignature(c.backend.Validators(), data, sig)
 }

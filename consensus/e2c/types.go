@@ -16,6 +16,7 @@
 
 package e2c
 
+// These are the states for status
 const (
 	SteadyState uint32 = iota
 	VotePhase

@@ -29,10 +29,20 @@ type Backend interface {
 
 	// Returns the current Leader
 	Leader() common.Address
+
+	// Return the set of validators
 	Validators() Validators
+
+	// Returns F for the valset
 	F() uint64
+
+	// Returns the state the system is, Steady-State, View Change, etc
 	Status() uint32
+
+	// Changes the status the node is in
 	SetStatus(uint32)
+
+	// Returns the view
 	View() uint64
 
 	// EventMux returns the event mux in backend
@@ -40,24 +50,33 @@ type Backend interface {
 
 	// Broadcast sends a message to all peers
 	Broadcast([]byte) error
+
+	// Send sends a message to a single peer
 	Send([]byte, common.Address) error
 
+	// commit adds the block to the chain
 	Commit(*types.Block)
 
 	// Verify verifies the block is valid
 	Verify(*types.Block) error
 
+	// This is used by core to access a block from the chain
 	GetBlockFromChain(common.Hash) (*types.Block, error)
 
 	// Sign signs input data with the backend's private key
 	Sign([]byte) ([]byte, error)
 
+	// Triggers a view change
 	ChangeView()
 }
 
 type Engine interface {
+	// Starts the engine by initializing variables
 	Start(*types.Block) error
+
+	// Stops the engine by clearing memory/writing to caches
 	Stop() error
+
+	// Returns blocks that are currently in the queue
 	GetQueuedBlock(common.Hash) (*types.Header, error)
-	Lock() *types.Block
 }

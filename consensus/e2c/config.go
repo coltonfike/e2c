@@ -19,14 +19,12 @@ package e2c
 import "time"
 
 type Config struct {
-	Period                 uint64        `toml:",omitempty"` // Default minimum difference between two consecutive block's timestamps in second
-	Delta                  time.Duration `toml:",omitempty"` // Default minimum difference between two consecutive block's timestamps in second
-	F                      uint64        `toml:",omitempty"` // Default minimum difference between two consecutive block's timestamps in second
-	AllowedFutureBlockTime uint64        `toml:",omitempty"` // Default minimum difference between two consecutive block's timestamps in second
+	Delta                  time.Duration `toml:",omitempty"` // Network speed
+	F                      uint64        `toml:",omitempty"` // Should delete this after client doesn't need it anymore
+	AllowedFutureBlockTime uint64        `toml:",omitempty"` // This is required by miner, even though we don't use it
 }
 
 var DefaultConfig = &Config{
-	Period:                 1,
 	Delta:                  1000,
 	F:                      1,
 	AllowedFutureBlockTime: 0,

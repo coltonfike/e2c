@@ -47,6 +47,7 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 	recents, _ := lru.NewARC(inmemorySnapshots)
 	recentMessages, _ := lru.NewARC(inmemoryPeers)
 	knownMessages, _ := lru.NewARC(inmemoryMessages)
+
 	backend := &backend{
 		config:         config,
 		eventMux:       new(event.TypeMux),
@@ -61,6 +62,7 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 		status:         0,
 		view:           0,
 		blockCh:        make(chan *types.Block),
+
 		// @ todo add a timeout feature for clientBlocks
 		clientBlocks: make(map[common.Hash]uint64),
 	}
@@ -75,16 +77,19 @@ type backend struct {
 	eventMux   *event.TypeMux
 	privateKey *ecdsa.PrivateKey
 	address    common.Address
+
 	// @todo only put this in genesis block?
-	validators  e2c.Validators
+	validators e2c.Validators
+
 	core        e2c.Engine
 	logger      log.Logger
 	db          ethdb.Database
 	chain       consensus.Chain
 	coreStarted bool
 	coreMu      sync.RWMutex
-	status      uint32
-	view        uint64
+
+	status uint32 // this tracks whether we are in steady state or view change
+	view   uint64
 
 	blockCh chan *types.Block
 
@@ -96,9 +101,12 @@ type backend struct {
 
 	recentMessages *lru.ARCCache // the cache of peer's messages
 	knownMessages  *lru.ARCCache // the cache of self messages
-	clientBlocks   map[common.Hash]uint64
+
+	// map for tracking acks of a block
+	clientBlocks map[common.Hash]uint64
 }
 
+// Implements consensus.Engine.CalcDifficulty
 func (b *backend) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
 	return new(big.Int)
 }
@@ -108,11 +116,12 @@ func (b *backend) Address() common.Address {
 	return b.address
 }
 
-// Validators implements e2c.Backend.Validators
+// Leader implements e2c.Backend.Leader
 func (b *backend) Leader() common.Address {
 	return b.validators[b.view%uint64(len(b.validators))]
 }
 
+// Validators implements e2c.Backend.Validators
 func (b *backend) Validators() e2c.Validators {
 	return b.validators
 }
@@ -125,19 +134,23 @@ func (b *backend) View() uint64 {
 	return b.view
 }
 
+// Synchronized to prevent possible race conditions
 func (b *backend) Status() uint32 {
 	return atomic.LoadUint32(&b.status)
 }
 
+// Synchronized to prevent possible race conditions
 func (b *backend) SetStatus(val uint32) {
 	atomic.StoreUint32(&b.status, val)
 }
 
-// Broadcast implements e2c.Backend.Gossip
+// Broadcast implements e2c.Backend.Broadcast
 func (b *backend) Broadcast(payload []byte) error {
 	hash := e2c.RLPHash(payload)
 	b.knownMessages.Add(hash, true)
 
+	// build this array so we can use a method
+	// in eth/handler.go to get a list of consensus.Peer
 	targets := make(map[common.Address]bool)
 	for _, val := range b.validators {
 		if val != b.Address() {
@@ -147,7 +160,10 @@ func (b *backend) Broadcast(payload []byte) error {
 
 	if b.broadcaster != nil {
 		ps := b.broadcaster.FindPeers(targets)
+		// iterate over peerset
 		for addr, p := range ps {
+
+			// check if the peer has already seen this message
 			ms, ok := b.recentMessages.Get(addr)
 			var m *lru.ARCCache
 			if ok {
@@ -157,17 +173,20 @@ func (b *backend) Broadcast(payload []byte) error {
 					continue
 				}
 			} else {
+				// store the message for this peer so we don't resend it
 				m, _ = lru.NewARC(inmemoryMessages)
 			}
 
 			m.Add(hash, true)
 			b.recentMessages.Add(addr, m)
+			// send the message
 			go p.SendConsensus(e2cMsg, payload)
 		}
 	}
 	return nil
 }
 
+// sends message to a single peer
 func (b *backend) Send(payload []byte, addr common.Address) error {
 	hash := e2c.RLPHash(payload)
 	b.knownMessages.Add(hash, true)
@@ -178,6 +197,7 @@ func (b *backend) Send(payload []byte, addr common.Address) error {
 			targets[val] = true
 		}
 	}
+
 	ps := b.broadcaster.FindPeers(targets)
 	p, ok := ps[addr]
 	if !ok {
@@ -185,6 +205,7 @@ func (b *backend) Send(payload []byte, addr common.Address) error {
 		return errors.New("no peer with given addr")
 	}
 
+	// cache message so we don't resend it
 	ms, ok := b.recentMessages.Get(addr)
 	var c *lru.ARCCache
 	if ok {
@@ -228,18 +249,23 @@ func (b *backend) Verify(block *types.Block) error {
 		// @todo add this as an error
 		//return errInvalidBlockBody
 	}
+
+	// Check block body with basic checks
 	if err := block.SanityCheck(); err != nil {
 		return err
 	}
+
 	return b.VerifyHeader(b.chain, block.Header(), false)
 }
 
+// Changes backend variables needed for view change
 func (b *backend) ChangeView() {
 	b.SetStatus(e2c.VotePhase)
 	b.view++
 	b.logger.Info("View change has been triggered", "leader", b.Leader())
 }
 
+// Retrieves the block from the chain for e2c.Core
 func (b *backend) GetBlockFromChain(hash common.Hash) (*types.Block, error) {
 	header := b.chain.GetHeaderByHash(hash)
 	if header == nil {

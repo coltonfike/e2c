@@ -16,6 +16,9 @@
 
 package backend
 
+// Note From Colton: This might be meaningful in the future, but at
+// present I don't use it for anything
+
 import (
 	"encoding/json"
 

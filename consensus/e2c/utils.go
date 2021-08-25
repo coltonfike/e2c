@@ -43,6 +43,7 @@ func GetSignatureAddress(data []byte, sig []byte) (common.Address, error) {
 	return crypto.PubkeyToAddress(*pubkey), nil
 }
 
+// checks that the signer was in the validator set
 func CheckValidatorSignature(validators Validators, data []byte, sig []byte) (common.Address, error) {
 	signer, err := GetSignatureAddress(data, sig)
 	if err != nil {

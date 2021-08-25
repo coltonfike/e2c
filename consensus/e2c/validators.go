@@ -8,6 +8,7 @@ import (
 
 type Validators []common.Address
 
+// retrieves the validator index given it's address
 func (v Validators) GetByAddress(addr common.Address) (int, common.Address) {
 	for i, val := range v {
 		if addr == val {

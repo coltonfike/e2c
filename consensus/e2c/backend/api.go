@@ -16,6 +16,9 @@
 
 package backend
 
+// Note from Colton: This file contains nothing meaningful.
+// I would assume everything in here doesn't work
+
 import (
 	"errors"
 

@@ -41,7 +41,7 @@ var (
 
 // Protocol implements consensus.Engine.Protocol
 func (b *backend) Protocol() consensus.Protocol {
-	return consensus.IstanbulProtocol
+	return consensus.IstanbulProtocol // E2C runs on the IstanbulProtocol
 }
 
 func (b *backend) decode(msg p2p.Msg) ([]byte, common.Hash, error) {
@@ -80,12 +80,12 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		}
 		b.knownMessages.Add(hash, true)
 
+		// Send the message to the e2c.Core for handling
 		go b.eventMux.Post(e2c.MessageEvent{Payload: data})
 	}
-	//@todo, both of these lower ones need to be adjusted so that we only reject ones that we handle
 	// We commit our own blocks, and thus, don't want this to run on the protocol manager
 	if msg.Code == NewBlockMsg {
-		// ignore if we aren't a client node
+		// ignore if we aren't a client node, since we receive our blocks in the above if
 		if b.coreStarted {
 			return true, nil
 		}
@@ -98,6 +98,7 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			return true, err
 		}
 
+		// add to the count of how many times we have seen this block
 		if n, ok := b.clientBlocks[request.Block.Hash()]; ok {
 			b.clientBlocks[request.Block.Hash()] = n + 1
 		} else {
@@ -113,6 +114,12 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		if b.clientBlocks[request.Block.Hash()] == b.config.F+1 {
 			b.Commit(request.Block)
 
+			// Delete the parent block. If we delete the one we just committed
+			// then we will probably see it again since we commit at F+1 acks
+			// This means it doesn't actually get delete and we will run into
+			// Memory errors. So instead we delete the parent since we shouldn't
+			// See that block anymore. We could add a timeout function to delete
+			// after a set interval
 			delete(b.clientBlocks, request.Block.ParentHash())
 			b.logger.Info("[E2C] Client committed block", "number", request.Block.Number(), "hash", request.Block.Hash())
 		}
@@ -123,7 +130,7 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		if b.coreStarted {
 			return true, nil
 		}
-		// @todo wait for so many acks before committing
+		// @todo Maybe the client should handle the block headers?
 		return true, nil
 	}
 	return false, nil
@@ -135,7 +142,8 @@ func (b *backend) SetBroadcaster(broadcaster consensus.Broadcaster) {
 }
 
 // NewChainHead implements consensus.Handler.SetBroadcaster
-// It's useless in E2C
+// It's useless in E2C, we just have it so we can use the consensus.Handler
+// like in Istanbul
 func (b *backend) NewChainHead() error {
 	return nil
 }

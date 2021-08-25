@@ -20,36 +20,12 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
-type Blame struct {
-	View uint64
-	// Are these necessary?
-	//	Block     *types.Block
-	//	BlockStar *types.Block
-}
-
-func (b *Blame) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, []interface{}{b.View}) //, b.Block, b.BlockStar})
-}
-
-func (b *Blame) DecodeRLP(s *rlp.Stream) error {
-	var blame struct {
-		View uint64
-		// Block     *types.Block
-		// BlockStar *types.Block
-	}
-
-	if err := s.Decode(&blame); err != nil {
-		return err
-	}
-	// b.View, b.Block, b.BlockStar = blame.View, blame.Block, blame.BlockStar
-	b.View = blame.View
-	return nil
-}
+// All of these are structs for sending messages with more data than one field
+// Each of them includes method for RLP encoding/decoding
 
 type Vote struct {
 	Blocks []*Message
@@ -69,12 +45,6 @@ func (v *Vote) DecodeRLP(s *rlp.Stream) error {
 	}
 	v.Blocks = vote.Blocks
 	return nil
-}
-
-type BlameCertificateEvent struct {
-	Lock      *types.Block
-	Committed *types.Block
-	Address   common.Address
 }
 
 type BlockCertificate struct {
@@ -123,38 +93,16 @@ func (bc *BlameCert) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-type BlameCertificate struct {
-	Lock      *types.Block
-	Committed *types.Block
-}
-
-func (bc *BlameCertificate) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, []interface{}{bc.Lock, bc.Committed})
-}
-
-func (bc *BlameCertificate) DecodeRLP(s *rlp.Stream) error {
-	var cert struct {
-		Lock      *types.Block
-		Committed *types.Block
-	}
-
-	if err := s.Decode(&cert); err != nil {
-		return err
-	}
-	bc.Lock, bc.Committed = cert.Lock, cert.Committed
-	return nil
-}
-
-type B1 struct {
+type FirstProposal struct {
 	Cert  *BlockCertificate
 	Block *types.Block
 }
 
-func (b *B1) EncodeRLP(w io.Writer) error {
+func (b *FirstProposal) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, []interface{}{b.Cert, b.Block})
 }
 
-func (b *B1) DecodeRLP(s *rlp.Stream) error {
+func (b *FirstProposal) DecodeRLP(s *rlp.Stream) error {
 	var cert struct {
 		Cert  *BlockCertificate
 		Block *types.Block
@@ -167,17 +115,16 @@ func (b *B1) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-type B2 struct {
-	//@todo change this to array of validate messages
+type SecondProposal struct {
 	Validates []*Message
 	Block     *types.Block
 }
 
-func (b *B2) EncodeRLP(w io.Writer) error {
+func (b *SecondProposal) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, []interface{}{b.Validates, b.Block})
 }
 
-func (b *B2) DecodeRLP(s *rlp.Stream) error {
+func (b *SecondProposal) DecodeRLP(s *rlp.Stream) error {
 	var cert struct {
 		Validates []*Message
 		Block     *types.Block

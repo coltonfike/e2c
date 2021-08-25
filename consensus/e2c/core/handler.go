@@ -18,6 +18,7 @@ package core
 
 import "github.com/ethereum/go-ethereum/consensus/e2c"
 
+// main event loop for core
 func (c *core) loop() {
 	defer func() {
 		c.handlerWg.Done()
@@ -33,6 +34,7 @@ func (c *core) loop() {
 			}
 
 			switch ev := event.Data.(type) {
+			// we received a message from another node
 			case e2c.MessageEvent:
 				msg := new(Message)
 				if err := msg.FromPayload(ev.Payload, c.checkValidatorSignature); err != nil {
@@ -42,10 +44,13 @@ func (c *core) loop() {
 				}
 			}
 
+			// we have mined a new block: only the leader uses this case
 		case block := <-c.blockCh:
 			if err := c.propose(block); err != nil {
 				c.logger.Error("Failed to propose new block", "err", err)
 			}
+
+			// this is the case where a blocks timer expired and is ready for commit
 		case <-c.blockQueue.c():
 			if c.backend.Status() != e2c.VotePhase {
 				if block, ok := c.blockQueue.getNext(); ok {
@@ -53,11 +58,14 @@ func (c *core) loop() {
 				}
 			}
 
+			// progress timer has expired
 		case <-c.progressTimer.c():
 			if c.backend.Address() != c.backend.Leader() {
 				c.sendBlame()
 				c.logger.Info("[E2C] Progress Timer expired! Sending Blame message!")
 			}
+
+			// the 4 delta timer in view change has expired
 		case <-c.certTimer.C:
 			if c.backend.Status() == e2c.VotePhase {
 				if err := c.sendFirstProposal(); err != nil {
@@ -68,14 +76,17 @@ func (c *core) loop() {
 	}
 }
 
+// messge was received, handle it properly
 func (c *core) handleMsg(msg *Message) bool {
-	// @todo check message came from one of validators
 
 	if err := c.verifyMsg(msg); err != nil {
 		c.logger.Error("Failed to verify message", "err", err)
 		return false
 	}
 
+	// all of these methods must return a bool
+	// true means the message should be relayed
+	// false means message should not be relayed
 	switch msg.Code {
 	case NewBlockMsg:
 		return c.handleProposal(msg)

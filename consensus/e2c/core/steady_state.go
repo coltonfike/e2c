@@ -13,6 +13,7 @@ var (
 	errRequestingBlock = errors.New("requesting block")
 )
 
+// sends a new block to all the nodes
 func (c *core) propose(block *types.Block) error {
 	data, err := Encode(block)
 	if err != nil {
@@ -28,6 +29,7 @@ func (c *core) propose(block *types.Block) error {
 	return nil
 }
 
+// handles a new block proposal by verifying it
 func (c *core) handleProposal(msg *Message) bool {
 
 	if c.backend.Address() == c.backend.Leader() { // leader doesn't do this process
@@ -57,6 +59,7 @@ func (c *core) handleProposal(msg *Message) bool {
 
 func (c *core) handleBlock(block *types.Block) error {
 
+	// verify the block is valid
 	if err := c.verify(block); err != nil {
 		if err == consensus.ErrUnknownAncestor { // blocks may have arrived out of order. request it
 			c.blockQueue.insertUnhandled(block)
@@ -66,12 +69,14 @@ func (c *core) handleBlock(block *types.Block) error {
 			}
 			return errRequestingBlock // this is necessary to signal an if statement in request that this block wasn't committed
 		} else {
+			// the block is bad, send blame
 			c.logger.Warn("[E2C] Sending Blame", "err", err, "number", block.Number())
 			c.sendBlame()
 			return err
 		}
 	}
 
+	// block is good, add to progress timer and insert this block to our queue
 	c.logger.Info("[E2C] Valid block received", "number", block.Number().Uint64(), "hash", block.Hash())
 	c.progressTimer.AddDuration(2)
 

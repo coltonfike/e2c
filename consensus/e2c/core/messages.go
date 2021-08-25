@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
+// Message codes
 const (
 	NewBlockMsg uint64 = iota
 	BlameMsg
@@ -95,6 +96,7 @@ func (m *Message) VerifySig(validateFn func([]byte, []byte) (common.Address, err
 		return err
 	}
 
+	// ensure message came from validators
 	addr, err := validateFn(payload, m.Signature)
 	if err != nil {
 		return err
@@ -106,6 +108,7 @@ func (m *Message) VerifySig(validateFn func([]byte, []byte) (common.Address, err
 	return nil
 }
 
+// Sign the message
 func (m *Message) Sign(sign func([]byte) ([]byte, error)) error {
 	data, err := m.PayloadNoSig()
 	if err != nil {
@@ -118,20 +121,23 @@ func (m *Message) Sign(sign func([]byte) ([]byte, error)) error {
 	return nil
 }
 
+// Converts the message into []byte
 func (m *Message) Payload() ([]byte, error) {
 	return rlp.EncodeToBytes(m)
 }
 
+// returns the []byte of message with an empty sig field for signing
 func (m *Message) PayloadNoSig() ([]byte, error) {
 	return rlp.EncodeToBytes(&Message{
 		Code:      m.Code,
 		Msg:       m.Msg,
 		View:      m.View,
-		Address:   m.Address, // @todo when changing to more memory efficient signing, make this empty
+		Address:   m.Address, // @todo when changing to more memory efficient signing, make this empty?
 		Signature: []byte{},
 	})
 }
 
+// retrieve payload with a Signature included
 func (m *Message) PayloadWithSig(sign func([]byte) ([]byte, error)) ([]byte, error) {
 	if err := m.Sign(sign); err != nil {
 		return nil, err
@@ -139,6 +145,7 @@ func (m *Message) PayloadWithSig(sign func([]byte) ([]byte, error)) ([]byte, err
 	return m.Payload()
 }
 
+// Decodes the message.Msg field into val
 func (m *Message) Decode(val interface{}) error {
 	return rlp.DecodeBytes(m.Msg, val)
 }
@@ -147,14 +154,15 @@ func (m *Message) String() string {
 	return fmt.Sprintf("{Code: %v, Address: %v}", m.Code, m.Address.String())
 }
 
+// Encodes val into a []byte for the message.Msg field. Note that val must be able to be RLP encoded
 func Encode(val interface{}) ([]byte, error) {
 	return rlp.EncodeToBytes(val)
 }
 
+// ensures the message is from correct view
 func (c *core) verifyMsg(msg *Message) error {
 	if msg.View != c.backend.View() && !(msg.Code == RequestBlockMsg || msg.Code == RespondMsg) {
 		return errors.New("msg from different view")
 	}
-	// @todo check message came from validators
 	return nil
 }

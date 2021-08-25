@@ -106,6 +106,7 @@ func (b *backend) VerifyHeader(chain consensus.ChainHeaderReader, header *types.
 // a batch of new headers.
 func (b *backend) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
 
+	// if node is a client node, we don't have to verify
 	if !b.coreStarted {
 		return nil
 	}
@@ -161,18 +162,23 @@ func (b *backend) verifyCascadingFields(chain consensus.ChainHeaderReader, heade
 	} else {
 		parent = chain.GetHeader(header.ParentHash, number-1)
 	}
+
+	// check that the parent is valid
 	if parent == nil || parent.Number.Uint64() != number-1 || parent.Hash() != header.ParentHash {
 
 		// We probably have the block, but it's queued for commit, so ask the core if we have it first
 		var err error
 		parent, err = b.core.GetQueuedBlock(header.ParentHash)
+		// core doesn't have block either, this block has no known parent
 		if err != nil {
 			return consensus.ErrUnknownAncestor
 		}
 	}
-	if parent.Time+b.config.Period > header.Time {
+
+	if parent.Time > header.Time {
 		return errInvalidTimestamp
 	}
+
 	if err := b.verifySigner(chain, header, parents); err != nil {
 		return err
 	}
@@ -223,9 +229,14 @@ func (b *backend) VerifyUncles(chain consensus.ChainReader, block *types.Block) 
 // verifySigner checks whether the signer is the leader
 func (b *backend) verifySigner(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
 	// Verifying the genesis block is not supported
-	if b.Status() != e2c.SteadyState { // this is here because block signer was of previous view, block should have already been verified so we can skip this step
+	// this is here because block signer was of previous view,
+	// block should have already been verified so we can skip this step
+	// If fact, not skipping this step will break system since the leader
+	// has changed
+	if b.Status() != e2c.SteadyState {
 		return nil
 	}
+
 	number := header.Number.Uint64()
 	if number == 0 {
 		return errUnknownBlock
@@ -237,7 +248,7 @@ func (b *backend) verifySigner(chain consensus.ChainHeaderReader, header *types.
 		return err
 	}
 
-	// Signer should be in the validator set of previous block's extraData.
+	// Signer should be the leader of the view
 	if signer != b.Leader() {
 		return errUnauthorized
 	}
@@ -285,7 +296,7 @@ func (b *backend) Prepare(chain consensus.ChainHeaderReader, header *types.Heade
 	header.Extra = extra
 
 	// set header's timestamp
-	header.Time = parent.Time + b.config.Period
+	header.Time = parent.Time
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
 	}
@@ -323,6 +334,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	// update the block header timestamp and signature and propose the block to core engine
 	header := block.Header()
 	number := header.Number.Uint64()
+
 	// Bail out if we're unauthorized to sign a block
 	if b.Leader() != b.address {
 		return errUnauthorized
@@ -332,14 +344,17 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
+
 	var err error
-	block, err = b.updateBlock(parent, block)
+	block, err = b.updateBlock(parent, block) // signs the block
 	if err != nil {
 		return err
 	}
+	// this bit just forces leader to equivocate. It should
+	// be commented out if running normally
 	if number == 20 && b.Address() == b.validators[0] {
 		b.logger.Info("[E2C] I'm Byzantine Leader that is equivocating")
-		head := block.Header()
+		head := block.Header() // this returns a copy, not the real value
 		head.Number = big.NewInt(19)
 		bl := types.NewBlock(head, nil, nil, nil, new(trie.Trie))
 		bl, _ = b.updateBlock(parent, bl)
@@ -348,6 +363,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		return nil
 	}
 
+	// this used to wait for a Period, but we don't use it now
 	// delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
 
 	// @todo good chance this is the source of the lost block bug
@@ -367,6 +383,8 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		results <- block
 	}
 	return nil
+	// like with delay, this used to be used to wait before committing
+	// but we no longer use it.
 	// go func() {
 	//					wait for the timestamp of header, use this to adjust the block period
 	// select {
@@ -410,7 +428,7 @@ func (b *backend) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}}
 }
 
-// Start implements consensus.Istanbul.Start
+// Start implements consensus.E2C.Start
 func (b *backend) Start(chain consensus.Chain) error {
 	b.coreMu.Lock()
 	defer b.coreMu.Unlock()
@@ -423,14 +441,18 @@ func (b *backend) Start(chain consensus.Chain) error {
 	if err := b.VerifyHeader(chain, header, false); err != nil {
 		return err
 	}
+
+	// get the validators from last valid block
 	e2cExtra, err := types.ExtractE2CExtra(header)
 	if err != nil {
 		return err
 	}
 	b.validators = e2cExtra.Validators
+
 	//@todo set view to whatever it should be
 	// How to know what it should be?
 
+	// Start the core
 	if err := b.core.Start(chain.GetBlock(header.Hash(), header.Number.Uint64())); err != nil {
 		return err
 	}
@@ -439,7 +461,7 @@ func (b *backend) Start(chain consensus.Chain) error {
 	return nil
 }
 
-// Stop implements consensus.Istanbul.Stop
+// Stop implements consensus.E2C.Stop
 func (b *backend) Stop() error {
 	b.coreMu.Lock()
 	defer b.coreMu.Unlock()
