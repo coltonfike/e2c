@@ -49,7 +49,7 @@ func (v *Vote) DecodeRLP(s *rlp.Stream) error {
 
 type BlockCertificate struct {
 	Block *types.Block
-	Votes []*Message
+	Votes [][]byte
 }
 
 func (bc *BlockCertificate) EncodeRLP(w io.Writer) error {
@@ -59,7 +59,7 @@ func (bc *BlockCertificate) EncodeRLP(w io.Writer) error {
 func (bc *BlockCertificate) DecodeRLP(s *rlp.Stream) error {
 	var cert struct {
 		Block *types.Block
-		Votes []*Message
+		Votes [][]byte
 	}
 
 	if err := s.Decode(&cert); err != nil {
@@ -71,26 +71,6 @@ func (bc *BlockCertificate) DecodeRLP(s *rlp.Stream) error {
 
 func (bc *BlockCertificate) String() string {
 	return fmt.Sprintf("{Number: %v, Hash: %v, Votes: %v}", bc.Block.Number(), bc.Block.Hash().String(), bc.Votes)
-}
-
-type BlameCert struct {
-	Blames []*Message
-}
-
-func (bc *BlameCert) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, []interface{}{bc.Blames})
-}
-
-func (bc *BlameCert) DecodeRLP(s *rlp.Stream) error {
-	var cert struct {
-		Blames []*Message
-	}
-
-	if err := s.Decode(&cert); err != nil {
-		return err
-	}
-	bc.Blames = cert.Blames
-	return nil
 }
 
 type FirstProposal struct {
@@ -116,7 +96,7 @@ func (b *FirstProposal) DecodeRLP(s *rlp.Stream) error {
 }
 
 type SecondProposal struct {
-	Validates []*Message
+	Validates [][]byte
 	Block     *types.Block
 }
 
@@ -126,7 +106,7 @@ func (b *SecondProposal) EncodeRLP(w io.Writer) error {
 
 func (b *SecondProposal) DecodeRLP(s *rlp.Stream) error {
 	var cert struct {
-		Validates []*Message
+		Validates [][]byte
 		Block     *types.Block
 	}
 

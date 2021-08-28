@@ -3,6 +3,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -14,17 +15,17 @@ import (
 func (c *core) changeView() {
 
 	// reset all our data structures default state
-	c.blame = make(map[common.Address]*Message)
-	c.validates = make(map[common.Address]*Message)
-	c.votes = make(map[common.Hash]map[common.Address]*Message)
+	c.blame = make(map[common.Address][]byte)
+	c.validates = make(map[common.Address][]byte)
+	c.votes = make(map[common.Hash]map[common.Address][]byte)
 	c.progressTimer = NewProgressTimer(c.config.Delta * time.Millisecond) // @todo How to reset this properly? what should timer be reset to? 4 blames on occasion
-	c.progressTimer.AddDuration(4)
+	c.progressTimer.AddDuration(8)
 	c.highestCert = nil
 
 	// store the votes for ourselves and broadcast the blocks so other nodes can vote on them
 	c.logger.Info("[E2C] Proposing blocks for voting", "committed number", c.committed.Number(), "committed hash", c.committed.Hash().String(), "lock number", c.lock.Number(), "lock hash", c.lock.Hash())
-	c.votes[c.committed.Hash()] = make(map[common.Address]*Message)
-	c.votes[c.lock.Hash()] = make(map[common.Address]*Message)
+	c.votes[c.committed.Hash()] = make(map[common.Address][]byte)
+	c.votes[c.lock.Hash()] = make(map[common.Address][]byte)
 
 	c.sendVote([]*types.Block{c.committed, c.lock})
 
@@ -34,11 +35,9 @@ func (c *core) changeView() {
 	}
 }
 
-// @todo figure out how to send this with a list of signatures for each block so
-// i don't have to use 2 message objects
 // Send votes out to all nodes
 func (c *core) sendVote(blocks []*types.Block) error {
-	// make each vote it's own message. It's ugly, but the quickest way to get it since the receiver needs to store each vote as it's own message
+	// make each vote it's own message. It's ugly, but the easiest way to get signatures on independent blocks rather than the whole message
 	votes := make([]*Message, len(blocks))
 	for i, block := range blocks {
 		msg, err := Encode(block)
@@ -46,13 +45,13 @@ func (c *core) sendVote(blocks []*types.Block) error {
 			return err
 		}
 		v := &Message{
-			Code:    VoteMsg,
-			Msg:     msg,
-			Address: c.backend.Address(),
+			Code: VoteMsg,
+			Msg:  msg,
+			View: c.backend.View(),
 		}
 		v.Sign(c.backend.Sign)
 		votes[i] = v
-		c.votes[block.Hash()][c.backend.Address()] = v
+		c.votes[block.Hash()][c.backend.Address()] = v.Signature
 	}
 
 	msg, err := Encode(votes)
@@ -89,7 +88,7 @@ func (c *core) handleVote(msg *Message) bool {
 		if block.Number().Uint64() >= c.committed.Number().Uint64() && block.Number().Uint64() <= c.lock.Number().Uint64() {
 
 			if b, ok := c.votes[block.Hash()]; ok {
-				b[msg.Address] = vote
+				b[msg.Address] = vote.Signature
 			}
 			c.logger.Info("[E2C] Voted for block", "number", block.Number(), "hash", block.Hash().String())
 			myVotes = append(myVotes)
@@ -119,7 +118,7 @@ func (c *core) sendBlockCertificate(block *types.Block) error {
 	// checkt that this block is the highested certificate locally. otherwise don't send it
 	if c.highestCert == nil || c.highestCert.Block.Number().Uint64() < block.Number().Uint64() {
 		// attach all the votes it received
-		var votes []*Message
+		var votes [][]byte
 		for _, val := range c.votes[block.Hash()] {
 			votes = append(votes, val)
 		}
@@ -151,13 +150,18 @@ func (c *core) verifyBlockCertificate(bc *BlockCertificate) error {
 		return errors.New("not enough votes")
 	}
 
-	// check all the votes are valid
-	for _, m := range bc.Votes {
-		if err := m.VerifySig(c.checkValidatorSignature); err != nil || m.Code != VoteMsg {
-			return errors.New("votes message invalid")
-		}
+	m, err := Encode(&bc.Block)
+	if err != nil {
+		return err
 	}
-	return nil
+	msg := &Message{
+		Code: VoteMsg,
+		View: c.backend.View(),
+		Msg:  m,
+	}
+
+	// check all the votes are valid
+	return VerifyCertificateSignatures(msg, bc.Votes, c.checkValidatorSignature)
 }
 
 func (c *core) handleBlockCertificate(msg *Message) bool {
@@ -194,6 +198,7 @@ func (c *core) sendFirstProposal() error {
 			break
 		}
 
+		fmt.Println(block, c.highestCert)
 		if block.Number().Uint64() <= c.highestCert.Block.Number().Uint64() {
 			c.commit(block)
 		}
@@ -224,7 +229,7 @@ func (c *core) sendFirstProposal() error {
 	if _, err := c.finalizeMessage(m); err != nil {
 		c.logger.Error("Failed to create validate msg")
 	}
-	c.validates[m.Address] = m
+	c.validates[m.Address] = m.Signature
 
 	return nil
 }
@@ -286,7 +291,7 @@ func (c *core) handleFirstProposal(msg *Message) bool {
 func (c *core) handleValidate(msg *Message) bool {
 
 	c.logger.Info("[E2C] Received validate message", "addr", msg.Address)
-	c.validates[msg.Address] = msg
+	c.validates[msg.Address] = msg.Signature
 
 	// if enough validates are received, send second proposal
 	if uint64(len(c.validates)) == c.backend.F()+1 {
@@ -303,7 +308,7 @@ func (c *core) sendSecondProposal() error {
 	block := <-c.blockCh
 
 	// add validates to the proposal
-	var validates []*Message
+	var validates [][]byte
 	for _, val := range c.validates {
 		validates = append(validates, val)
 	}
@@ -339,16 +344,18 @@ func (c *core) handleSecondProposal(msg *Message) bool {
 	}
 
 	// check that all validates are valid
-	for _, m := range b.Validates {
-		if err := m.VerifySig(c.checkValidatorSignature); err != nil || m.Code != ValidateMsg {
-			c.sendBlame()
-			c.logger.Warn("Blame sent", "err", "validates not valid")
-			return false
-		}
+	m := &Message{
+		Code: ValidateMsg,
+		View: c.backend.View(),
+	}
+	if err := VerifyCertificateSignatures(m, b.Validates, c.checkValidatorSignature); err != nil {
+		c.sendBlame()
+		c.logger.Warn("Blame sent", "err", err)
+		return false
 	}
 
 	if err := c.verify(b.Block); err != nil {
-		c.logger.Warn("Blame sent", "err", "invalid block")
+		c.logger.Warn("Blame sent", "err", err)
 		c.sendBlame()
 		return false
 	}

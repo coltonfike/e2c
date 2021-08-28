@@ -2,8 +2,6 @@ package core
 
 import (
 	"time"
-
-	"github.com/ethereum/go-ethereum/consensus/e2c"
 )
 
 // this sends a blame message to all nodes
@@ -14,13 +12,14 @@ func (c *core) sendBlame() error {
 		return nil
 	}
 
-	c.blame[c.backend.Address()] = &Message{}
-
 	// @todo send equivocating blocks??
-
-	c.broadcast(&Message{
+	msg := &Message{
 		Code: BlameMsg,
-	})
+	}
+
+	c.broadcast(msg)
+
+	c.blame[c.backend.Address()] = msg.Signature
 	return nil
 }
 
@@ -28,7 +27,7 @@ func (c *core) sendBlame() error {
 func (c *core) sendBlameCertificate() error {
 
 	// append all the blame messages received to the certificate
-	var blames []*Message
+	var blames [][]byte
 	for _, m := range c.blame {
 		blames = append(blames, m)
 	}
@@ -54,17 +53,12 @@ func (c *core) handleBlameMessage(msg *Message) bool {
 
 	// @todo do checking of blocks on equivocation if necessary?
 
-	c.blame[msg.Address] = msg // add this message to our blame map
+	c.blame[msg.Address] = msg.Signature // add this message to our blame map
 
 	c.logger.Info("[E2C] Blame message received", "addr", msg.Address, "total blame", len(c.blame))
 
 	// see if we have enough blame messages to change view
 	if uint64(len(c.blame)) == c.backend.F()+1 {
-
-		// check to see if we are already changing view
-		if c.backend.Status() != e2c.SteadyState {
-			return false
-		}
 
 		if err := c.sendBlameCertificate(); err != nil {
 			c.logger.Error("Failed to send blame certificate", "err", err)
@@ -83,26 +77,32 @@ func (c *core) handleBlameMessage(msg *Message) bool {
 // handles a blame certificate
 func (c *core) handleBlameCertificate(msg *Message) bool {
 
-	if c.backend.Status() != e2c.SteadyState { // we are already changing view
-		return false
-	}
-
-	var cert BlameCert
-	if err := msg.Decode(&cert); err != nil {
+	var blames [][]byte
+	if err := msg.Decode(&blames); err != nil {
 		c.logger.Error("Failed to decode blame message", "err", err)
 		return false
 	}
 
 	// verify that all the blame messages included are valid
-	if uint64(len(cert.Blames)) <= c.backend.F() {
+	if uint64(len(blames)) <= c.backend.F() {
 		c.logger.Error("Not enough blames")
 		return false
 	}
-	for _, msg := range cert.Blames {
-		if err := msg.VerifySig(c.checkValidatorSignature); err != nil || msg.Code != BlameMsg {
-			c.logger.Error("Invalid signature on blame message", "err", err)
-		}
-		// @todo do checking of blocks on equivocation if necessary?
+
+	m, err := Encode(blames)
+	if err != nil {
+		c.logger.Error("Failed to encode message", "err", err)
+		return false
+	}
+	ms := &Message{
+		Code: BlameMsg,
+		Msg:  m,
+		View: c.backend.View(),
+	}
+
+	if err := VerifyCertificateSignatures(ms, blames, c.checkValidatorSignature); err != nil {
+		c.logger.Error("Invalid signature on blame message", "err", err)
+		return false
 	}
 
 	c.backend.ChangeView()

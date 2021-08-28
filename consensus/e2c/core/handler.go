@@ -80,7 +80,7 @@ func (c *core) loop() {
 func (c *core) handleMsg(msg *Message) bool {
 
 	if err := c.verifyMsg(msg); err != nil {
-		c.logger.Error("Failed to verify message", "err", err)
+		c.logger.Error("Failed to verify message", "err", err, "code", msg.Code)
 		return false
 	}
 

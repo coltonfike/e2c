@@ -17,7 +17,6 @@
 package core
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -97,13 +96,8 @@ func (m *Message) VerifySig(validateFn func([]byte, []byte) (common.Address, err
 	}
 
 	// ensure message came from validators
-	addr, err := validateFn(payload, m.Signature)
-	if err != nil {
+	if _, err := validateFn(payload, m.Signature); err != nil {
 		return err
-	}
-	if !bytes.Equal(addr.Bytes(), m.Address.Bytes()) {
-		return errors.New("invalid signer")
-		//return errInvalidSigner @todo add this error
 	}
 	return nil
 }
@@ -132,7 +126,7 @@ func (m *Message) PayloadNoSig() ([]byte, error) {
 		Code:      m.Code,
 		Msg:       m.Msg,
 		View:      m.View,
-		Address:   m.Address, // @todo when changing to more memory efficient signing, make this empty?
+		Address:   common.Address{},
 		Signature: []byte{},
 	})
 }
@@ -157,6 +151,28 @@ func (m *Message) String() string {
 // Encodes val into a []byte for the message.Msg field. Note that val must be able to be RLP encoded
 func Encode(val interface{}) ([]byte, error) {
 	return rlp.EncodeToBytes(val)
+}
+
+func VerifyCertificateSignatures(msg *Message, sigs [][]byte, validateFn func([]byte, []byte) (common.Address, error)) (err error) {
+	// Validate Message (on a Message without Signature)
+	var payload []byte
+	payload, err = msg.PayloadNoSig()
+	if err != nil {
+		return err
+	}
+
+	unique := make(map[common.Address]bool)
+	for _, sig := range sigs {
+		addr, err := validateFn(payload, sig)
+		if err != nil {
+			return err
+		}
+		if _, ok := unique[addr]; ok {
+			return errors.New("signatures not all unique")
+		}
+		unique[addr] = true
+	}
+	return nil
 }
 
 // ensures the message is from correct view

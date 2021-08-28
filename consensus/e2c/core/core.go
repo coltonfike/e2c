@@ -37,9 +37,9 @@ func New(backend e2c.Backend, config *e2c.Config, ch chan *types.Block) e2c.Engi
 		backend:    backend,
 		blockQueue: NewBlockQueue(config.Delta),
 		blockCh:    ch,
-		blame:      make(map[common.Address]*Message),
-		validates:  make(map[common.Address]*Message),
-		votes:      make(map[common.Hash]map[common.Address]*Message),
+		blame:      make(map[common.Address][]byte),
+		validates:  make(map[common.Address][]byte),
+		votes:      make(map[common.Hash]map[common.Address][]byte),
 	}
 
 	return c
@@ -57,9 +57,9 @@ type core struct {
 
 	// Data structures for core
 	blockQueue *blockQueue
-	blame      map[common.Address]*Message
-	validates  map[common.Address]*Message
-	votes      map[common.Hash]map[common.Address]*Message
+	blame      map[common.Address][]byte
+	validates  map[common.Address][]byte
+	votes      map[common.Hash]map[common.Address][]byte
 
 	backend   e2c.Backend
 	eventMux  *event.TypeMuxSubscription
