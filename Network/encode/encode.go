@@ -1,4 +1,4 @@
-package encode
+package main
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	atypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -41,4 +42,6 @@ func main() {
 		common.HexToAddress("0x25b4c0b45f421e29a1660cfe3bb68511f7cfec26"),
 		common.HexToAddress("0x1c7e5ff787dc181bf5ce7f2eb38d582e0e246350")}
 	fmt.Println(Encode("0x00", addr))
+	E2CDigest := common.HexToHash(crypto.Keccak256Hash([]byte("E2C practical byzantine fault tolerance")).String())
+	fmt.Println(E2CDigest.String())
 }
