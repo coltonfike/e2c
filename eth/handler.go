@@ -792,7 +792,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		request.Block.ReceivedAt = msg.ReceivedAt
 		request.Block.ReceivedFrom = p
 
-		if e2c, ok := pm.engine.(consensus.E2C); ok { // quorum: NewBlock required for consensus, e.g. "istanbul"
+		// e2c runs clients difficulty than eth. Call the e2c client method to handle it
+		// it'll return true if the block should be committed
+		if e2c, ok := pm.engine.(consensus.E2C); ok {
 			pubKey := p.Node().Pubkey()
 			addr := crypto.PubkeyToAddress(*pubKey)
 			if !e2c.ClientVerify(request.Block, addr, pm.blockchain) {
