@@ -29,7 +29,6 @@ import (
 var (
 	// E2CDigest represents a hash of "E2C practical byzantine fault tolerance"
 	// to identify whether the block is from E2C consensus engine
-	//E2CDigest = common.HexToHash("0x63746963616c2062797a616e74696e65206661756c7420746f6c6572616e6365")
 	E2CDigest = common.HexToHash(crypto.Keccak256Hash([]byte("E2C practical byzantine fault tolerance")).String())
 
 	E2CExtraVanity = 32                     // Fixed number of extra-data bytes reserved for validator vanity
