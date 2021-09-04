@@ -18,12 +18,10 @@ package backend
 
 import (
 	"errors"
-	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/p2p"
 	lru "github.com/hashicorp/golang-lru"
 )
@@ -85,52 +83,18 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 	}
 	// We commit our own blocks, and thus, don't want this to run on the protocol manager
 	if msg.Code == NewBlockMsg {
-		// ignore if we aren't a client node, since we receive our blocks in the above if
 		if b.coreStarted {
 			return true, nil
 		}
-
-		var request struct {
-			Block *types.Block
-			TD    *big.Int
-		}
-		if err := msg.Decode(&request); err != nil {
-			return true, err
-		}
-
-		// add to the count of how many times we have seen this block
-		if n, ok := b.clientBlocks[request.Block.Hash()]; ok {
-			b.clientBlocks[request.Block.Hash()] = n + 1
-		} else {
-			b.clientBlocks[request.Block.Hash()] = 1
-		}
-
-		b.logger.Info("[E2C] Block acknowledgement received", "number", request.Block.Number(), "hash", request.Block.Hash(), "total acks", b.clientBlocks[request.Block.Hash()])
-		// @todo we would like to use b.F() and to check these messages came from out validator set, but I don't know how to get that information
-		// to the client. This code doesn't get access to the chain, only validator nodes get that, and because we don't have access to the chain
-		// we can't get access to the genesis block which has the list of validators. I'm sure there is a way to get that information to the client
-		// but I have looked for about 5 hours and can't find it, so I'm letting a network weakness exist for clients and using an extra field in the config
-		// to work around it until I find a solution
-		if b.clientBlocks[request.Block.Hash()] == b.config.F+1 {
-			b.Commit(request.Block)
-
-			// Delete the parent block. If we delete the one we just committed
-			// then we will probably see it again since we commit at F+1 acks
-			// This means it doesn't actually get delete and we will run into
-			// Memory errors. So instead we delete the parent since we shouldn't
-			// See that block anymore. We could add a timeout function to delete
-			// after a set interval
-			delete(b.clientBlocks, request.Block.ParentHash())
-			b.logger.Info("[E2C] Client committed block", "number", request.Block.Number(), "hash", request.Block.Hash())
-		}
-		return true, nil
+		// client nodes want the eth.Handler to run this
+		return false, nil
 	}
 	// Likewise, we reject block header announcements sent by fetcher
 	if msg.Code == NewBlockHashesMsg {
 		if b.coreStarted {
 			return true, nil
 		}
-		// @todo Maybe the client should handle the block headers?
+		//TODO: Maybe the client should handle the block headers?
 		return true, nil
 	}
 	return false, nil
@@ -143,7 +107,6 @@ func (b *backend) SetBroadcaster(broadcaster consensus.Broadcaster) {
 
 // NewChainHead implements consensus.Handler.SetBroadcaster
 // It's useless in E2C, we just have it so we can use the consensus.Handler
-// like in Istanbul
 func (b *backend) NewChainHead() error {
 	return nil
 }

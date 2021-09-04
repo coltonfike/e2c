@@ -172,4 +172,6 @@ type E2C interface {
 	Stop() error
 
 	ShouldMine() bool
+
+	ClientVerify(*types.Block, common.Address, ChainHeaderReader) bool
 }

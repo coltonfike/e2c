@@ -86,6 +86,7 @@ type backend struct {
 	chain       consensus.Chain
 	coreStarted bool
 	coreMu      sync.RWMutex
+	clientMu    sync.RWMutex
 
 	status uint32 // this tracks whether we are in steady state or view change
 	view   uint64

@@ -792,6 +792,14 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		request.Block.ReceivedAt = msg.ReceivedAt
 		request.Block.ReceivedFrom = p
 
+		if e2c, ok := pm.engine.(consensus.E2C); ok { // quorum: NewBlock required for consensus, e.g. "istanbul"
+			pubKey := p.Node().Pubkey()
+			addr := crypto.PubkeyToAddress(*pubKey)
+			if !e2c.ClientVerify(request.Block, addr, pm.blockchain) {
+				return nil
+			}
+		}
+
 		// Mark the peer as owning the block and schedule it for import
 		p.MarkBlock(request.Block.Hash())
 		pm.blockFetcher.Enqueue(p.id, request.Block)
@@ -1078,16 +1086,3 @@ func (self *ProtocolManager) FindPeers(targets map[common.Address]bool) map[comm
 }
 
 // End Quorum
-
-// E2C
-func (pm *ProtocolManager) PeerSet() map[common.Address]consensus.Peer {
-	m := make(map[common.Address]consensus.Peer)
-	for _, p := range pm.peers.Peers() {
-		pubKey := p.Node().Pubkey()
-		addr := crypto.PubkeyToAddress(*pubKey)
-		m[addr] = p
-	}
-	return m
-}
-
-// End E2C
