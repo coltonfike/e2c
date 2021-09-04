@@ -33,7 +33,7 @@ func (c *core) handleRequest(msg *Message) bool {
 		c.logger.Error("Failed to decode request", "err", err)
 		return false
 	}
-	c.logger.Debug("Request from block received", "hash", hash, "from", msg.Address)
+	c.logger.Debug("Request for block received", "hash", hash, "from", msg.Address)
 
 	block, err := c.backend.GetBlockFromChain(hash) // check if the block has been committed
 	if err != nil {                                 // if it hasn't been committed, check if we have the block in our queue

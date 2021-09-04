@@ -170,4 +170,6 @@ type E2C interface {
 
 	// Stop stops the engine
 	Stop() error
+
+	ShouldMine() bool
 }

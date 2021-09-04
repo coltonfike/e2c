@@ -79,4 +79,5 @@ type Engine interface {
 
 	// Returns blocks that are currently in the queue
 	GetQueuedBlock(common.Hash) (*types.Header, error)
+	Propose(*types.Block) error
 }

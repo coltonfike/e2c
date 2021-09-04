@@ -121,7 +121,7 @@ func (c *core) verify(block *types.Block) error {
 	if err := c.backend.Verify(block); err != nil {
 		return err
 	}
-	if block.Number().Uint64() != (c.lock.Number().Uint64() + 1) {
+	if block.Number().Uint64() <= (c.lock.Number().Uint64()) {
 		//@todo add real error here
 		return errors.New("equivocation detected")
 	}

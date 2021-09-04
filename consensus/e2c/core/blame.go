@@ -20,6 +20,7 @@ func (c *core) sendBlame() error {
 	c.broadcast(msg)
 
 	c.blame[c.backend.Address()] = msg.Signature
+	c.checkBlame()
 	return nil
 }
 
@@ -56,6 +57,12 @@ func (c *core) handleBlameMessage(msg *Message) bool {
 	c.blame[msg.Address] = msg.Signature // add this message to our blame map
 
 	c.logger.Info("[E2C] Blame message received", "addr", msg.Address, "total blame", len(c.blame))
+	c.checkBlame()
+
+	return true
+}
+
+func (c *core) checkBlame() {
 
 	// see if we have enough blame messages to change view
 	if uint64(len(c.blame)) == c.backend.F()+1 {
@@ -69,9 +76,7 @@ func (c *core) handleBlameMessage(msg *Message) bool {
 		<-time.After(c.config.Delta * time.Millisecond) // wait 1 delta for all nodes to quit view
 		// start the view change protocol
 		c.changeView()
-
 	}
-	return true
 }
 
 // handles a blame certificate

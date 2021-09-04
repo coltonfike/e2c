@@ -45,14 +45,16 @@ func (c *core) loop() {
 			}
 
 			// we have mined a new block: only the leader uses this case
-		case block := <-c.blockCh:
-			if err := c.propose(block); err != nil {
-				c.logger.Error("Failed to propose new block", "err", err)
-			}
+			/*
+				case block := <-c.blockCh:
+					if err := c.propose(block); err != nil {
+						c.logger.Error("Failed to propose new block", "err", err)
+					}
+			*/
 
 			// this is the case where a blocks timer expired and is ready for commit
 		case <-c.blockQueue.c():
-			if c.backend.Status() != e2c.VotePhase {
+			if c.backend.Status() == e2c.SteadyState {
 				if block, ok := c.blockQueue.getNext(); ok {
 					c.commit(block)
 				}

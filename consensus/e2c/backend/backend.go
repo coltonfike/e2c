@@ -106,6 +106,10 @@ type backend struct {
 	clientBlocks map[common.Hash]uint64
 }
 
+func (b *backend) ShouldMine() bool {
+	return b.Status() != e2c.VotePhase
+}
+
 // Implements consensus.Engine.CalcDifficulty
 func (b *backend) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
 	return new(big.Int)

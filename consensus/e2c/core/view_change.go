@@ -3,7 +3,6 @@ package core
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -198,7 +197,6 @@ func (c *core) sendFirstProposal() error {
 			break
 		}
 
-		fmt.Println(block, c.highestCert)
 		if block.Number().Uint64() <= c.highestCert.Block.Number().Uint64() {
 			c.commit(block)
 		}
@@ -274,8 +272,9 @@ func (c *core) handleFirstProposal(msg *Message) bool {
 	c.blockQueue = NewBlockQueue(c.config.Delta)
 
 	// commit new block in the proposal
-	c.blockQueue.insertHandled(b.Block)
-	c.lock = b.Block
+	c.handleBlock(b.Block)
+	//c.blockQueue.insertHandled(b.Block)
+	//c.lock = b.Block
 
 	// @todo is this a broadcast or just send to leader?
 	c.send(&Message{
@@ -354,14 +353,14 @@ func (c *core) handleSecondProposal(msg *Message) bool {
 		return false
 	}
 
-	if err := c.verify(b.Block); err != nil {
+	if err := c.handleBlock(b.Block); err != nil {
 		c.logger.Warn("Blame sent", "err", err)
 		c.sendBlame()
 		return false
 	}
 
-	c.blockQueue.insertHandled(b.Block)
-	c.lock = b.Block
+	//c.blockQueue.insertHandled(b.Block)
+	//c.lock = b.Block
 	c.backend.SetStatus(e2c.SteadyState)
 	c.logger.Info("[E2C] View Change completed! Resuming normal operations")
 	return true

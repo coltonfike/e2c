@@ -350,8 +350,10 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	if err != nil {
 		return err
 	}
+
 	// this bit just forces leader to equivocate. It should
 	// be commented out if running normally
+
 	if number == 20 && b.Address() == b.validators[0] {
 		b.logger.Info("[E2C] I'm Byzantine Leader that is equivocating")
 		head := block.Header() // this returns a copy, not the real value
@@ -363,42 +365,18 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		return nil
 	}
 
-	// this used to wait for a Period, but we don't use it now
-	// delay := time.Unix(int64(block.Header().Time), 0).Sub(now())
-
-	// @todo good chance this is the source of the lost block bug
 	status := b.Status()
-	if status == e2c.SteadyState {
-		results <- block
+	if status != e2c.VotePhase {
 
-		b.blockCh <- block
-		b.logger.Info("[E2C] Successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
+		if err := b.core.Propose(block); err != nil {
+			return nil
+		}
+		results <- block
+		b.logger.Info("[E2C] Successfully sealed block", "number", block.Number(), "txs", len(block.Transactions()), "hash", block.Hash())
 	} else if status == e2c.VotePhase {
 		return nil
-	} else if status == e2c.FirstProposal {
-		b.blockCh <- block
-		results <- block
-	} else if status == e2c.SecondProposal {
-		b.blockCh <- block
-		results <- block
 	}
 	return nil
-	// like with delay, this used to be used to wait before committing
-	// but we no longer use it.
-	// go func() {
-	//					wait for the timestamp of header, use this to adjust the block period
-	// select {
-	// case <-time.After(delay):
-	// results <- block
-	// if err = b.SendNewBlock(block); err != nil {
-	// return
-	// }
-	// b.logger.Info("E2C Engine successfully sealed block", "number", number, "txs", len(block.Transactions()), "hash", block.Hash())
-	// case <-stop:
-	// return
-	// }
-	// }()
-	// return nil
 }
 
 // update timestamp and signature of the block based on its number of transactions

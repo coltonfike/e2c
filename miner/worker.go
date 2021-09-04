@@ -983,6 +983,12 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	if e2c, ok := w.engine.(consensus.E2C); ok {
+		if !e2c.ShouldMine() {
+			return
+		}
+	}
+
 	tstart := time.Now()
 	parent := w.chain.CurrentBlock()
 
