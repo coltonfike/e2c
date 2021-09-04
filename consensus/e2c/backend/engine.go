@@ -345,6 +345,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		return consensus.ErrUnknownAncestor
 	}
 
+	head := block.Header() // this returns a copy, not the real value
 	var err error
 	block, err = b.updateBlock(parent, block) // signs the block
 	if err != nil {
@@ -353,29 +354,20 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 
 	// this bit just forces leader to equivocate. It should
 	// be commented out if running normally
-
 	if number == 20 && b.Address() == b.validators[0] {
 		b.logger.Info("[E2C] I'm Byzantine Leader that is equivocating")
-		head := block.Header() // this returns a copy, not the real value
-		head.Number = big.NewInt(19)
+		head.Number = big.NewInt(20)
 		bl := types.NewBlock(head, nil, nil, nil, new(trie.Trie))
-		bl, _ = b.updateBlock(parent, bl)
-		b.blockCh <- bl
+		b.core.Propose(bl)
 		results <- block
 		return nil
 	}
 
-	status := b.Status()
-	if status != e2c.VotePhase {
-
-		if err := b.core.Propose(block); err != nil {
-			return nil
-		}
-		results <- block
-		b.logger.Info("[E2C] Successfully sealed block", "number", block.Number(), "txs", len(block.Transactions()), "hash", block.Hash())
-	} else if status == e2c.VotePhase {
+	if err := b.core.Propose(block); err != nil {
 		return nil
 	}
+	results <- block
+	b.logger.Info("[E2C] Successfully sealed block", "number", block.Number(), "txs", len(block.Transactions()), "hash", block.Hash())
 	return nil
 }
 

@@ -68,11 +68,9 @@ func (c *core) loop() {
 			}
 
 			// the 4 delta timer in view change has expired
-		case <-c.certTimer.C:
-			if c.backend.Status() == e2c.VotePhase {
-				if err := c.sendFirstProposal(); err != nil {
-					c.logger.Error("Failed to encode block certificate", "err", err)
-				}
+		case <-c.votingTimer.C:
+			if c.backend.Status() == e2c.Wait {
+				c.prepareFirstProposal()
 			}
 		}
 	}

@@ -29,14 +29,13 @@ import (
 )
 
 // New creates an E2C consensus core
-func New(backend e2c.Backend, config *e2c.Config, ch chan *types.Block) e2c.Engine {
+func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
 	c := &core{
 		config:     config,
 		handlerWg:  new(sync.WaitGroup),
 		logger:     log.New(),
 		backend:    backend,
 		blockQueue: NewBlockQueue(config.Delta),
-		blockCh:    ch,
 		blame:      make(map[common.Address][]byte),
 		validates:  make(map[common.Address][]byte),
 		votes:      make(map[common.Hash]map[common.Address][]byte),
@@ -48,12 +47,11 @@ func New(backend e2c.Backend, config *e2c.Config, ch chan *types.Block) e2c.Engi
 // ----------------------------------------------------------------------------
 
 type core struct {
-	config  *e2c.Config
-	logger  log.Logger
-	blockCh chan *types.Block
+	config *e2c.Config
+	logger log.Logger
 
 	progressTimer *ProgressTimer // tracks the progress of leader
-	certTimer     *time.Timer    // this is only used in view change to wait the 4 delta
+	votingTimer   *time.Timer    // this is only used in view change to wait the 4 delta
 
 	// Data structures for core
 	blockQueue *blockQueue
@@ -74,7 +72,7 @@ type core struct {
 func (c *core) Start(block *types.Block) error {
 	c.lock = block
 	c.progressTimer = NewProgressTimer(c.config.Delta * time.Millisecond)
-	c.certTimer = time.NewTimer(1 * time.Millisecond)
+	c.votingTimer = time.NewTimer(1 * time.Millisecond)
 	c.subscribeEvents()
 
 	// start event loop
@@ -96,9 +94,6 @@ func (c *core) Stop() error {
 func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
 	b, ok := c.blockQueue.get(hash)
 	if ok {
-		return b.Header(), nil
-	}
-	if b, ok = c.blockQueue.unhandled[hash]; ok {
 		return b.Header(), nil
 	}
 	return nil, errors.New("unknown block")

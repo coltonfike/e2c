@@ -10,19 +10,26 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-var (
-	errRequestingBlock = errors.New("requesting block")
-)
-
 // sends a new block to all the nodes
 func (c *core) Propose(block *types.Block) error {
+
+	if c.backend.Status() == e2c.Wait {
+		return nil
+	}
 
 	if c.committed != nil && block.Number().Uint64() != c.committed.Number().Uint64()+1 {
 		return errors.New("given duplicate block")
 	}
-	if c.backend.Status() == e2c.FirstProposal || c.backend.Status() == e2c.SecondProposal {
-		c.blockCh <- block
-		c.lock = block
+	if c.backend.Status() == e2c.FirstProposal {
+		if err := c.sendFirstProposal(block); err != nil {
+			return err
+		}
+		c.committed = block
+		return nil
+	} else if c.backend.Status() == e2c.SecondProposal {
+		if err := c.sendSecondProposal(block); err != nil {
+			return err
+		}
 		c.committed = block
 		return nil
 	}
@@ -59,13 +66,13 @@ func (c *core) handleProposal(msg *Message) bool {
 		// @todo print err
 		return false
 	}
-	if _, ok := c.blockQueue.get(block.Hash()); ok { // we have already handled this block
+	if c.blockQueue.contains(block.Hash()) { // we have already handled this block
 		return false
 	}
 
 	// verify the block is valid
 	if err := c.verify(block); err != nil {
-		if err == consensus.ErrUnknownAncestor { // blocks may have arrived out of order. request it
+		if err == consensus.ErrUnknownAncestor { // blocks may have arrived out of order. Request the block
 			c.blockQueue.insertUnhandled(block)
 			fmt.Println("Missing parent of block", block.Number().Uint64())
 			if err := c.sendRequest(block.ParentHash(), common.Address{}); err != nil {
@@ -80,33 +87,34 @@ func (c *core) handleProposal(msg *Message) bool {
 		}
 	}
 
-	c.handleBlock(block)
+	c.handleBlockAndAncestors(block)
 	return true
 }
 
-func (c *core) handleBlock(block *types.Block) error {
+func (c *core) handleBlockAndAncestors(block *types.Block) error {
 
-	if c.blockQueue.hasRequest(block.Hash()) {
-		for {
-			if child, ok := c.blockQueue.getChild(block.Hash()); ok {
-				// TODO: do another verify here
-				if err := c.handleBlock(child); err != nil {
-					c.logger.Error("Failed to handle block", "err", err)
-					return err
-				}
-				block = child
-			} else {
-				break
+	c.handleBlock(block)
+
+	for {
+		if child, ok := c.blockQueue.getChild(block.Hash()); ok {
+
+			if err := c.verify(child); err != nil {
+				return err
 			}
+
+			c.handleBlock(child)
+			block = child
+		} else {
+			return nil
 		}
 	}
+}
+
+func (c *core) handleBlock(block *types.Block) {
 
 	// block is good, add to progress timer and insert this block to our queue
 	c.logger.Info("[E2C] Valid block received", "number", block.Number().Uint64(), "hash", block.Hash())
 	c.progressTimer.AddDuration(2)
-
 	c.blockQueue.insertHandled(block)
 	c.lock = block
-
-	return nil
 }

@@ -61,12 +61,11 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 		knownMessages:  knownMessages,
 		status:         0,
 		view:           0,
-		blockCh:        make(chan *types.Block),
 
 		// @ todo add a timeout feature for clientBlocks
 		clientBlocks: make(map[common.Hash]uint64),
 	}
-	backend.core = e2cCore.New(backend, backend.config, backend.blockCh)
+	backend.core = e2cCore.New(backend, backend.config)
 	return backend
 }
 
@@ -91,8 +90,6 @@ type backend struct {
 	status uint32 // this tracks whether we are in steady state or view change
 	view   uint64
 
-	blockCh chan *types.Block
-
 	// Snapshots for recent block to speed up reorgs
 	recents *lru.ARCCache
 
@@ -107,7 +104,7 @@ type backend struct {
 }
 
 func (b *backend) ShouldMine() bool {
-	return b.Status() != e2c.VotePhase
+	return !b.coreStarted || b.Status() != e2c.Wait && b.Leader() == b.Address()
 }
 
 // Implements consensus.Engine.CalcDifficulty
@@ -264,7 +261,7 @@ func (b *backend) Verify(block *types.Block) error {
 
 // Changes backend variables needed for view change
 func (b *backend) ChangeView() {
-	b.SetStatus(e2c.VotePhase)
+	b.SetStatus(e2c.Wait)
 	b.view++
 	b.logger.Info("View change has been triggered", "leader", b.Leader())
 }

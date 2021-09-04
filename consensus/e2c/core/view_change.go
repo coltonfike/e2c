@@ -30,7 +30,7 @@ func (c *core) changeView() {
 
 	// new leader sets a timer for itself to make first proposal after 4 delta
 	if c.backend.Address() == c.backend.Leader() {
-		c.certTimer.Reset(4 * c.config.Delta * time.Millisecond)
+		c.votingTimer.Reset(4 * c.config.Delta * time.Millisecond)
 	}
 }
 
@@ -186,32 +186,19 @@ func (c *core) handleBlockCertificate(msg *Message) bool {
 	return true
 }
 
-// sends the first proposal of new view when the 4 delta timer expires
-func (c *core) sendFirstProposal() error {
+func (c *core) prepareFirstProposal() {
 
 	// commit all the blocks needed to get to the highest cert
 	// for example last committed was block 5, highest cert is 10, we commit blocks 5-10 here
-	for {
-		block, ok := c.blockQueue.getNext()
-		if !ok {
-			break
-		}
-
-		if block.Number().Uint64() <= c.highestCert.Block.Number().Uint64() {
-			c.commit(block)
-		}
-	}
-
-	// set status to allow the engine to make new blocks again
-	c.backend.SetStatus(e2c.FirstProposal)
-	// read the new block
-	block := <-c.blockCh
-	//@todo This may be cause of lost block bug
-	// set engine to phase for next proposal
-	c.backend.SetStatus(e2c.SecondProposal)
-	c.logger.Info("[E2C] Proposing new block", "number", block.Number(), "hash", block.Hash().String(), "certificate", c.highestCert)
-	// make a new block queue
+	c.commitToHighest()
 	c.blockQueue = NewBlockQueue(c.config.Delta)
+	c.backend.SetStatus(e2c.FirstProposal)
+}
+
+// sends the first proposal of new view when the 4 delta timer expires
+func (c *core) sendFirstProposal(block *types.Block) error {
+
+	c.logger.Info("[E2C] Proposing new block", "number", block.Number(), "hash", block.Hash().String(), "certificate", c.highestCert)
 
 	data, err := Encode(&FirstProposal{Cert: c.highestCert, Block: block})
 	if err != nil {
@@ -229,6 +216,7 @@ func (c *core) sendFirstProposal() error {
 	}
 	c.validates[m.Address] = m.Signature
 
+	c.backend.SetStatus(e2c.Wait)
 	return nil
 }
 
@@ -257,54 +245,37 @@ func (c *core) handleFirstProposal(msg *Message) bool {
 		c.sendBlame()
 		return false
 	}
-	// @todo make this a standalone method so it isn't duplicated
-	// commit all blocks up to highest cert
-	for {
-		block, ok := c.blockQueue.getNext()
-		if !ok {
-			break
-		}
 
-		if block.Number().Uint64() <= c.highestCert.Block.Number().Uint64() {
-			c.commit(block)
-		}
-	}
-	c.blockQueue = NewBlockQueue(c.config.Delta)
+	// commit all blocks up to highest cert
+	c.commitToHighest()
 
 	// commit new block in the proposal
 	c.handleBlock(b.Block)
-	//c.blockQueue.insertHandled(b.Block)
-	//c.lock = b.Block
 
-	// @todo is this a broadcast or just send to leader?
-	c.send(&Message{
+	c.broadcast(&Message{
 		Code: ValidateMsg,
-	}, c.backend.Leader())
+	})
 
-	c.backend.SetStatus(e2c.SecondProposal)
 	c.logger.Info("[E2C] Sending validate for first block in view", "number", b.Block.Number(), "hash", b.Block.Hash().String())
 	return true
 }
 
-// @todo maybe broadcast these?
 func (c *core) handleValidate(msg *Message) bool {
+	if c.backend.Address() != c.backend.Leader() {
+		return true
+	}
 
 	c.logger.Info("[E2C] Received validate message", "addr", msg.Address)
 	c.validates[msg.Address] = msg.Signature
 
 	// if enough validates are received, send second proposal
 	if uint64(len(c.validates)) == c.backend.F()+1 {
-		if err := c.sendSecondProposal(); err != nil {
-			c.logger.Error("Failed to send second proposal", "err", err)
-			return false
-		}
+		c.backend.SetStatus(e2c.SecondProposal)
 	}
 	return false
 }
 
-func (c *core) sendSecondProposal() error {
-	// read block from engine
-	block := <-c.blockCh
+func (c *core) sendSecondProposal(block *types.Block) error {
 
 	// add validates to the proposal
 	var validates [][]byte
@@ -353,15 +324,28 @@ func (c *core) handleSecondProposal(msg *Message) bool {
 		return false
 	}
 
-	if err := c.handleBlock(b.Block); err != nil {
+	if err := c.verify(b.Block); err != nil {
 		c.logger.Warn("Blame sent", "err", err)
 		c.sendBlame()
 		return false
 	}
 
-	//c.blockQueue.insertHandled(b.Block)
-	//c.lock = b.Block
+	c.handleBlock(b.Block)
 	c.backend.SetStatus(e2c.SteadyState)
 	c.logger.Info("[E2C] View Change completed! Resuming normal operations")
 	return true
+}
+
+func (c *core) commitToHighest() {
+	for {
+		block, ok := c.blockQueue.getNext()
+		if !ok {
+			break
+		}
+
+		if block.Number().Uint64() <= c.highestCert.Block.Number().Uint64() {
+			c.commit(block)
+		}
+	}
+	c.blockQueue = NewBlockQueue(c.config.Delta)
 }

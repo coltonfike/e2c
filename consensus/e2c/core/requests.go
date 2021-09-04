@@ -72,24 +72,7 @@ func (c *core) handleResponse(msg *Message) bool {
 	}
 	c.logger.Info("Response to request received", "number", block.Number().Uint64(), "hash", block.Hash(), "from", msg.Address)
 
-	if err := c.handleBlock(block); err != nil && err != errRequestingBlock {
-		c.logger.Error("Failed to handle block", "err", err)
-		return false
-	}
+	c.handleBlockAndAncestors(block)
 	delete(c.blockQueue.requestQueue, block.Hash())
-
-	// if this block was missing, it probably stopped us from committing the block coming after it (say we missed block 4, but we do have 5,6,..).
-	// so we look to see if we have this blocks child then handle that block as well. Continue until we have handled all the children
-	for {
-		if child, ok := c.blockQueue.getChild(block.Hash()); ok {
-			if err := c.handleBlock(child); err != nil {
-				c.logger.Error("Failed to handle block", "err", err)
-				return false
-			}
-			block = child
-		} else {
-			break
-		}
-	}
 	return false
 }
