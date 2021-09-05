@@ -18,6 +18,7 @@ type blockQueue struct {
 	requestQueue map[common.Hash]struct{}
 	unhandled    map[common.Hash]*types.Block
 	parent       map[common.Hash]*types.Block
+	byNumber     map[uint64]*types.Block
 	nextBlock    common.Hash
 	lastBlock    common.Hash
 	timer        *time.Timer
@@ -31,6 +32,7 @@ func NewBlockQueue(delta time.Duration) *blockQueue {
 		requestQueue: make(map[common.Hash]struct{}),
 		unhandled:    make(map[common.Hash]*types.Block),
 		parent:       make(map[common.Hash]*types.Block),
+		byNumber:     make(map[uint64]*types.Block),
 		delta:        delta,
 		timer:        time.NewTimer(time.Millisecond),
 		size:         0,
@@ -69,6 +71,7 @@ func (bq *blockQueue) insertHandled(block *types.Block) {
 		block: block,
 		time:  time.Now(),
 	}
+	bq.byNumber[block.Number().Uint64()] = block
 	bq.size++
 }
 
@@ -79,6 +82,14 @@ func (bq *blockQueue) get(hash common.Hash) (*types.Block, bool) {
 		return nil, ok
 	}
 	return p.block, ok
+}
+
+func (bq *blockQueue) getByNumber(num uint64) (*types.Block, bool) {
+	block, ok := bq.byNumber[num]
+	if !ok {
+		return nil, ok
+	}
+	return block, ok
 }
 
 // checks to see if we have the block anywhere, either the handled queue or unhandledqueue
@@ -98,6 +109,9 @@ func (bq *blockQueue) hasRequest(hash common.Hash) bool {
 }
 
 func (bq *blockQueue) delete(hash common.Hash) {
+	if b, ok := bq.queue[hash]; ok {
+		delete(bq.byNumber, b.block.Number().Uint64())
+	}
 	delete(bq.queue, hash)
 }
 

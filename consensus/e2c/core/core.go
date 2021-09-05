@@ -28,6 +28,10 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+var (
+	errEquivocatingBlocks = errors.New("equivocation detected")
+)
+
 // New creates an E2C consensus core
 func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
 	c := &core{
@@ -117,8 +121,7 @@ func (c *core) verify(block *types.Block) error {
 		return err
 	}
 	if block.Number().Uint64() <= (c.lock.Number().Uint64()) {
-		//@todo add real error here
-		return errors.New("equivocation detected")
+		return errEquivocatingBlocks
 	}
 	return nil
 }

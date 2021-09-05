@@ -240,6 +240,8 @@ func (c *core) handleFirstProposal(msg *Message) bool {
 		return false
 	}
 
+	c.lock = b.Cert.Block
+
 	if err := c.verify(b.Block); err != nil {
 		c.logger.Warn("Blame sent", "err", err)
 		c.sendBlame()

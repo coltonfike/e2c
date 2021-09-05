@@ -2,6 +2,8 @@ package core
 
 import (
 	"time"
+
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 // this sends a blame message to all nodes
@@ -12,12 +14,40 @@ func (c *core) sendBlame() error {
 		return nil
 	}
 
-	// @todo send equivocating blocks??
 	msg := &Message{
 		Code: BlameMsg,
 	}
 
 	c.broadcast(msg)
+
+	c.blame[c.backend.Address()] = msg.Signature
+	c.checkBlame()
+	return nil
+}
+
+func (c *core) sendEquivBlame(b1 *types.Block, b2 *types.Block) error {
+
+	msg := &Message{
+		Code:    BlameMsg,
+		View:    c.backend.View(),
+		Address: c.backend.Address(),
+	}
+	msg.Sign(c.backend.Sign)
+
+	m, err := Encode(&EquivBlame{
+		Blame: msg,
+		B1:    b1,
+		B2:    b2,
+	})
+	if err != nil {
+		return err
+	}
+	mm := &Message{
+		Code: EquivBlameMsg,
+		Msg:  m,
+	}
+
+	c.broadcast(mm)
 
 	c.blame[c.backend.Address()] = msg.Signature
 	c.checkBlame()
@@ -48,18 +78,25 @@ func (c *core) sendBlameCertificate() error {
 // handle a blame message
 func (c *core) handleBlameMessage(msg *Message) bool {
 
-	if msg.View != c.backend.View() { // blame for different view
-		return false
-	}
-
-	// @todo do checking of blocks on equivocation if necessary?
-
 	c.blame[msg.Address] = msg.Signature // add this message to our blame map
 
 	c.logger.Info("[E2C] Blame message received", "addr", msg.Address, "total blame", len(c.blame))
 	c.checkBlame()
-
 	return true
+}
+
+func (c *core) handleEquivBlame(msg *Message) bool {
+
+	var blame EquivBlame
+	if err := msg.Decode(&blame); err != nil {
+		c.logger.Error("Failed to decode blame message", "err", err)
+		return false
+	}
+
+	if blame.B1.Number().Uint64() == blame.B2.Number().Uint64() && blame.B1.Hash() != blame.B2.Hash() && c.backend.IsSignerLeader(blame.B1) && c.backend.IsSignerLeader(blame.B2) {
+		return c.handleBlameMessage(blame.Blame)
+	}
+	return false
 }
 
 func (c *core) checkBlame() {

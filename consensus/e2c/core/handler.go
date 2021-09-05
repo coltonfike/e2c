@@ -16,7 +16,9 @@
 
 package core
 
-import "github.com/ethereum/go-ethereum/consensus/e2c"
+import (
+	"github.com/ethereum/go-ethereum/consensus/e2c"
+)
 
 // main event loop for core
 func (c *core) loop() {
@@ -63,8 +65,8 @@ func (c *core) loop() {
 			// progress timer has expired
 		case <-c.progressTimer.c():
 			if c.backend.Address() != c.backend.Leader() {
-				c.sendBlame()
 				c.logger.Info("[E2C] Progress Timer expired! Sending Blame message!")
+				c.sendBlame()
 			}
 
 			// the 4 delta timer in view change has expired
@@ -99,6 +101,9 @@ func (c *core) handleMsg(msg *Message) bool {
 
 	case BlameMsg:
 		return c.handleBlameMessage(msg)
+
+	case EquivBlameMsg:
+		return c.handleEquivBlame(msg)
 
 	case BlameCertificateMsg:
 		return c.handleBlameCertificate(msg)

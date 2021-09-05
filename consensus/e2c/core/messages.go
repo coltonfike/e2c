@@ -29,6 +29,7 @@ import (
 const (
 	NewBlockMsg uint64 = iota
 	BlameMsg
+	EquivBlameMsg
 	ValidateMsg
 	BlameCertificateMsg
 	BlockCertificateMsg

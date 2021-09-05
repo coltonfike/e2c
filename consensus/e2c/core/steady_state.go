@@ -2,7 +2,6 @@ package core
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -17,7 +16,8 @@ func (c *core) Propose(block *types.Block) error {
 		return nil
 	}
 
-	if c.committed != nil && block.Number().Uint64() != c.committed.Number().Uint64()+1 {
+	// we need to check this here. Eth engine will give duplicate blocks if it gets more transactions
+	if c.committed != nil && block.Number().Uint64() != c.committed.Number().Uint64()+1 && c.backend.Address() != c.backend.Validators()[0] { // last check allows a leader to equivocate for testing
 		return errors.New("given duplicate block")
 	}
 	if c.backend.Status() == e2c.FirstProposal {
@@ -74,13 +74,21 @@ func (c *core) handleProposal(msg *Message) bool {
 	if err := c.verify(block); err != nil {
 		if err == consensus.ErrUnknownAncestor { // blocks may have arrived out of order. Request the block
 			c.blockQueue.insertUnhandled(block)
-			fmt.Println("Missing parent of block", block.Number().Uint64())
 			if err := c.sendRequest(block.ParentHash(), common.Address{}); err != nil {
 				c.logger.Error("Failed to send request", "err", err)
 			}
 			return true
 		} else {
 			// the block is bad, send blame
+			if err == errEquivocatingBlocks {
+				equivBlock, ok := c.blockQueue.getByNumber(block.Number().Uint64())
+				if !ok {
+					equivBlock = c.backend.GetBlockByNumber(block.Number().Uint64())
+				}
+				c.logger.Warn("[E2C] Sending Blame", "err", err, "number", block.Number(), "B1 hash", block.Hash(), "B2 hash", equivBlock.Hash())
+				c.sendEquivBlame(block, equivBlock)
+				return false
+			}
 			c.logger.Warn("[E2C] Sending Blame", "err", err, "number", block.Number())
 			c.sendBlame()
 			return false

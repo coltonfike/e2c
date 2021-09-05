@@ -260,6 +260,14 @@ func (b *backend) Verify(block *types.Block) error {
 	return b.VerifyHeader(b.chain, block.Header(), false)
 }
 
+func (b *backend) IsSignerLeader(block *types.Block) bool {
+	signer, err := ecrecover(block.Header())
+	if err != nil {
+		return false
+	}
+	return signer == b.Leader()
+}
+
 // Changes backend variables needed for view change
 func (b *backend) ChangeView() {
 	b.SetStatus(e2c.Wait)
@@ -271,11 +279,13 @@ func (b *backend) ChangeView() {
 func (b *backend) GetBlockFromChain(hash common.Hash) (*types.Block, error) {
 	header := b.chain.GetHeaderByHash(hash)
 	if header == nil {
-		// @todo add this as error
 		return nil, errors.New("Chain doesn't have block")
 	}
-	// @todo just call GetBlock!
 	return b.chain.GetBlockByNumber(header.Number.Uint64()), nil
+}
+
+func (b *backend) GetBlockByNumber(num uint64) *types.Block {
+	return b.chain.GetBlockByNumber(num)
 }
 
 // Implements consensus.Engine.Close()

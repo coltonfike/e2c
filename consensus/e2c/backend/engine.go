@@ -228,15 +228,15 @@ func (b *backend) VerifyUncles(chain consensus.ChainReader, block *types.Block) 
 
 // verifySigner checks whether the signer is the leader
 func (b *backend) verifySigner(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
-	// Verifying the genesis block is not supported
 	// this is here because block signer was of previous view,
-	// block should have already been verified so we can skip this step
+	// block has already been verified so we can skip this step
 	// If fact, not skipping this step will break system since the leader
 	// has changed
 	if b.Status() != e2c.SteadyState {
 		return nil
 	}
 
+	// Verifying the genesis block is not supported
 	number := header.Number.Uint64()
 	if number == 0 {
 		return errUnknownBlock
@@ -345,7 +345,6 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		return consensus.ErrUnknownAncestor
 	}
 
-	head := block.Header() // this returns a copy, not the real value
 	var err error
 	block, err = b.updateBlock(parent, block) // signs the block
 	if err != nil {
@@ -356,8 +355,10 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	// be commented out if running normally
 	if number == 20 && b.Address() == b.validators[0] {
 		b.logger.Info("[E2C] I'm Byzantine Leader that is equivocating")
-		head.Number = big.NewInt(20)
+		head := block.Header() // this returns a copy, not the real value
+		head.Number = big.NewInt(19)
 		bl := types.NewBlock(head, nil, nil, nil, new(trie.Trie))
+		bl, _ = b.updateBlock(parent, bl)
 		b.core.Propose(bl)
 		results <- block
 		return nil

@@ -27,6 +27,30 @@ import (
 // All of these are structs for sending messages with more data than one field
 // Each of them includes method for RLP encoding/decoding
 
+type EquivBlame struct {
+	Blame *Message
+	B1    *types.Block
+	B2    *types.Block
+}
+
+func (b *EquivBlame) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{b.Blame, b.B1, b.B2})
+}
+
+func (b *EquivBlame) DecodeRLP(s *rlp.Stream) error {
+	var blame struct {
+		Blame *Message
+		B1    *types.Block
+		B2    *types.Block
+	}
+
+	if err := s.Decode(&blame); err != nil {
+		return err
+	}
+	b.Blame, b.B1, b.B2 = blame.Blame, blame.B1, blame.B2
+	return nil
+}
+
 type Vote struct {
 	Blocks []*Message
 }

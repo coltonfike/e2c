@@ -62,6 +62,8 @@ type Backend interface {
 
 	// This is used by core to access a block from the chain
 	GetBlockFromChain(common.Hash) (*types.Block, error)
+	GetBlockByNumber(uint64) *types.Block
+	IsSignerLeader(*types.Block) bool
 
 	// Sign signs input data with the backend's private key
 	Sign([]byte) ([]byte, error)
