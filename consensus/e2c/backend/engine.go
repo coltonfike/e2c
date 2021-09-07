@@ -389,9 +389,6 @@ func (b *backend) Start(chain consensus.Chain) error {
 	}
 	b.validators = e2cExtra.Validators
 
-	//@todo set view to whatever it should be
-	// How to know what it should be?
-
 	// Start the core
 	if err := b.core.Start(chain.GetBlock(header.Hash(), header.Number.Uint64())); err != nil {
 		return err

@@ -310,7 +310,6 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 
 		return istanbulBackend.New(&config.Istanbul, stack.GetNodeKey(), db)
 	}
-	//@todo fix this
 	if chainConfig.E2C != nil {
 		config.E2C.Delta = chainConfig.E2C.Delta
 		config.E2C.F = chainConfig.E2C.F
