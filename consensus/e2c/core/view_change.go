@@ -117,6 +117,7 @@ func (c *core) sendBlockCertificate(block *types.Block) error {
 	if c.highestCert == nil || c.highestCert.Block.Number().Uint64() < block.Number().Uint64() {
 		// attach all the votes it received
 		var votes [][]byte
+
 		for _, val := range c.votes[block.Hash()] {
 			votes = append(votes, val)
 		}
@@ -234,6 +235,7 @@ func (c *core) handleFirstProposal(msg *Message) bool {
 	if err := c.verifyBlockCertificate(b.Cert); err != nil {
 		c.sendBlame()
 		log.Warn("Blame sent", "err", err)
+		return false
 	}
 	// ensure block cert is extending our highest cert
 	if b.Cert.Block.Number().Uint64() < c.highestCert.Block.Number().Uint64() {

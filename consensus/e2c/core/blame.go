@@ -142,14 +142,8 @@ func (c *core) handleBlameCertificate(msg *Message) bool {
 
 	// in order for us to check that signatures are valid, we make a dummy message that
 	// the signatures should have signed
-	m, err := Encode(blames)
-	if err != nil {
-		log.Error("Failed to encode message", "err", err)
-		return false
-	}
 	ms := &Message{
 		Code: BlameMsg,
-		Msg:  m,
 		View: c.backend.View(),
 	}
 	// verify signatures are correct on the dummy message

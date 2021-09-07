@@ -74,8 +74,9 @@ func (c *core) loop() {
 // messge was received, handle it properly
 func (c *core) handleMsg(msg *Message) bool {
 
+	// this just checks the message is from the correct view
 	if err := c.verifyMsg(msg); err != nil {
-		log.Error("Failed to verify message", "err", err, "code", msg.Code)
+		log.Debug("Ignoring invalid message", "err", err, "code", msg.Code)
 		return false
 	}
 
