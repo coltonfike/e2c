@@ -2,12 +2,12 @@
 package core
 
 import (
-	"errors"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // change view
@@ -17,12 +17,12 @@ func (c *core) changeView() {
 	c.blame = make(map[common.Address][]byte)
 	c.validates = make(map[common.Address][]byte)
 	c.votes = make(map[common.Hash]map[common.Address][]byte)
-	c.progressTimer = NewProgressTimer(c.config.Delta * time.Millisecond) // @todo How to reset this properly? what should timer be reset to? 4 blames on occasion
-	c.progressTimer.AddDuration(8)
+	// TODO what should the timer be set to in view change?
+	c.progressTimer = NewProgressTimer(8 * c.config.Delta * time.Millisecond)
 	c.highestCert = nil
 
 	// store the votes for ourselves and broadcast the blocks so other nodes can vote on them
-	c.logger.Info("[E2C] Proposing blocks for voting", "committed number", c.committed.Number(), "committed hash", c.committed.Hash().String(), "lock number", c.lock.Number(), "lock hash", c.lock.Hash())
+	log.Info("Proposing blocks for voting", "committed number", c.committed.Number(), "committed hash", c.committed.Hash(), "lock number", c.lock.Number(), "lock hash", c.lock.Hash())
 	c.votes[c.committed.Hash()] = make(map[common.Address][]byte)
 	c.votes[c.lock.Hash()] = make(map[common.Address][]byte)
 
@@ -69,7 +69,7 @@ func (c *core) handleVote(msg *Message) bool {
 
 	var votes []*Message
 	if err := msg.Decode(&votes); err != nil {
-		c.logger.Error("Failed to decode vote message", "err", err)
+		log.Error("Failed to decode vote message", "err", err)
 		return false
 	}
 
@@ -79,7 +79,7 @@ func (c *core) handleVote(msg *Message) bool {
 
 		var block *types.Block
 		if err := vote.Decode(&block); err != nil {
-			c.logger.Error("Invalid vote message", "err", err)
+			log.Error("Invalid vote message", "err", err)
 			return false
 		}
 
@@ -89,7 +89,7 @@ func (c *core) handleVote(msg *Message) bool {
 			if b, ok := c.votes[block.Hash()]; ok {
 				b[msg.Address] = vote.Signature
 			}
-			c.logger.Info("[E2C] Voted for block", "number", block.Number(), "hash", block.Hash().String())
+			log.Info("Voted for block", "number", block.Number(), "hash", block.Hash())
 			myVotes = append(myVotes)
 		}
 	}
@@ -99,13 +99,13 @@ func (c *core) handleVote(msg *Message) bool {
 	// if either lock or committed has enough votes, send the block certificate
 	if uint64(len(c.votes[c.committed.Hash()])) == c.backend.F()+1 {
 		if err := c.sendBlockCertificate(c.committed); err != nil {
-			c.logger.Error("Failed to send block certificate", "err", err)
+			log.Error("Failed to send block certificate", "err", err)
 		}
 	}
 
 	if uint64(len(c.votes[c.lock.Hash()])) == c.backend.F()+1 {
 		if err := c.sendBlockCertificate(c.lock); err != nil {
-			c.logger.Error("Failed to send block certificate", "err", err)
+			log.Error("Failed to send block certificate", "err", err)
 		}
 	}
 
@@ -113,8 +113,7 @@ func (c *core) handleVote(msg *Message) bool {
 }
 
 func (c *core) sendBlockCertificate(block *types.Block) error {
-
-	// checkt that this block is the highested certificate locally. otherwise don't send it
+	// check that this block is the highested certificate locally. otherwise don't send it
 	if c.highestCert == nil || c.highestCert.Block.Number().Uint64() < block.Number().Uint64() {
 		// attach all the votes it received
 		var votes [][]byte
@@ -128,8 +127,9 @@ func (c *core) sendBlockCertificate(block *types.Block) error {
 			Votes: votes,
 		}
 
-		c.logger.Info("[E2C] New Highest Block is certified!", "number", block.Number(), "hash", block.Hash().String(), "votes", votes)
+		log.Info("New Highest Block is certified!", "number", block.Number(), "hash", block.Hash())
 
+		// send the certificate to all nodes
 		m, err := Encode(c.highestCert)
 		if err != nil {
 			return err
@@ -146,7 +146,7 @@ func (c *core) sendBlockCertificate(block *types.Block) error {
 func (c *core) verifyBlockCertificate(bc *BlockCertificate) error {
 	// check it has enough votes
 	if uint64(len(bc.Votes)) <= c.backend.F() {
-		return errors.New("not enough votes")
+		return errNotEnoughSignatures
 	}
 
 	m, err := Encode(&bc.Block)
@@ -166,21 +166,22 @@ func (c *core) verifyBlockCertificate(bc *BlockCertificate) error {
 func (c *core) handleBlockCertificate(msg *Message) bool {
 	var bc *BlockCertificate
 	if err := msg.Decode(&bc); err != nil {
-		c.logger.Error("Failed to decode block certificate", "err", err)
+		log.Error("Failed to decode block certificate", "err", err)
 		return false
 	}
 
 	// verify the cert is valid
 	if err := c.verifyBlockCertificate(bc); err != nil {
-		c.logger.Error("Block certificate invalid", "err", err)
+		log.Error("Block certificate invalid", "err", err)
 		return false
 	}
 
-	c.logger.Info("Block certificate received!", "addr", msg.Address)
+	log.Debug("Block certificate received!", "addr", msg.Address)
 
 	// if it's higher than our previous highest, replace previous highest with this cert
 	if c.highestCert == nil || c.highestCert.Block.Number().Uint64() < bc.Block.Number().Uint64() {
 		c.highestCert = bc
+		log.Info("New Highest Block is certified!", "number", c.highestCert.Block.Number(), "hash", c.highestCert.Block.Hash())
 	}
 
 	return true
@@ -198,7 +199,7 @@ func (c *core) prepareFirstProposal() {
 // sends the first proposal of new view when the 4 delta timer expires
 func (c *core) sendFirstProposal(block *types.Block) error {
 
-	c.logger.Info("[E2C] Proposing new block", "number", block.Number(), "hash", block.Hash().String(), "certificate", c.highestCert)
+	log.Info("Proposing first block in view", "number", block.Number(), "hash", block.Hash())
 
 	data, err := Encode(&FirstProposal{Cert: c.highestCert, Block: block})
 	if err != nil {
@@ -212,7 +213,7 @@ func (c *core) sendFirstProposal(block *types.Block) error {
 	// validate it's proposal
 	m := &Message{Code: ValidateMsg}
 	if _, err := c.finalizeMessage(m); err != nil {
-		c.logger.Error("Failed to create validate msg")
+		log.Error("Failed to create validate msg")
 	}
 	c.validates[m.Address] = m.Signature
 
@@ -223,28 +224,29 @@ func (c *core) sendFirstProposal(block *types.Block) error {
 func (c *core) handleFirstProposal(msg *Message) bool {
 	var b FirstProposal
 	if err := msg.Decode(&b); err != nil {
-		c.logger.Error("Failed to decode first proposal", "err", err)
+		log.Error("Failed to decode first proposal", "err", err)
 		return false
 	}
 
-	c.logger.Info("[E2C] Proposal for first block in view received", "number", b.Block.Number(), "hash", b.Block.Hash().String())
+	log.Info("Proposal for first block in view received", "number", b.Block.Number(), "hash", b.Block.Hash())
 
 	// ensure the block cert is valid
 	if err := c.verifyBlockCertificate(b.Cert); err != nil {
-		c.logger.Error("Block certificate invalid", "err", err)
+		c.sendBlame()
+		log.Warn("Blame sent", "err", err)
 	}
 	// ensure block cert is extending our highest cert
 	if b.Cert.Block.Number().Uint64() < c.highestCert.Block.Number().Uint64() {
 		c.sendBlame()
-		c.logger.Warn("Blame sent", "err", "does not extend block")
+		log.Warn("Blame sent", "err", errInvalidBlockCertificate)
 		return false
 	}
 
 	c.lock = b.Cert.Block
 
 	if err := c.verify(b.Block); err != nil {
-		c.logger.Warn("Blame sent", "err", err)
 		c.sendBlame()
+		log.Warn("Blame sent", "err", errInvalidBlock)
 		return false
 	}
 
@@ -258,16 +260,17 @@ func (c *core) handleFirstProposal(msg *Message) bool {
 		Code: ValidateMsg,
 	})
 
-	c.logger.Info("[E2C] Sending validate for first block in view", "number", b.Block.Number(), "hash", b.Block.Hash().String())
+	log.Info("Sending validate for first block in view", "number", b.Block.Number(), "hash", b.Block.Hash())
 	return true
 }
 
 func (c *core) handleValidate(msg *Message) bool {
+	// only the leader needs to use check these
 	if c.backend.Address() != c.backend.Leader() {
 		return true
 	}
 
-	c.logger.Info("[E2C] Received validate message", "addr", msg.Address)
+	log.Info("Received validate message", "addr", msg.Address)
 	c.validates[msg.Address] = msg.Signature
 
 	// if enough validates are received, send second proposal
@@ -294,7 +297,8 @@ func (c *core) sendSecondProposal(block *types.Block) error {
 		Msg:  data,
 	})
 
-	c.logger.Info("[E2C] Sent proposal for second block in view", "number", block.Number(), "hash", block.Hash().String(), "validates", validates)
+	log.Info("Sent proposal for second block in view", "number", block.Number(), "hash", block.Hash())
+	// view change is over, set the state back to normal
 	c.backend.SetStatus(e2c.SteadyState)
 	return nil
 }
@@ -302,16 +306,15 @@ func (c *core) sendSecondProposal(block *types.Block) error {
 func (c *core) handleSecondProposal(msg *Message) bool {
 	var b SecondProposal
 	if err := msg.Decode(&b); err != nil {
-		c.logger.Error("Failed to decode second proposal", "err", err)
+		log.Error("Failed to decode second proposal", "err", err)
 		return false
 	}
 
-	c.logger.Info("[E2C] Proposal for second block in view received", "number", b.Block.Number(), "hash", b.Block.Hash().String(), "validates", b.Validates)
+	log.Info("Proposal for second block in view received", "number", b.Block.Number(), "hash", b.Block.Hash())
 
-	// @todo check that each message is from different addr
 	if uint64(len(b.Validates)) <= c.backend.F() {
 		c.sendBlame()
-		c.logger.Warn("Blame sent", "err", "does not contain enough validates")
+		log.Warn("Blame sent", "err", errNotEnoughSignatures)
 		return false
 	}
 
@@ -322,22 +325,23 @@ func (c *core) handleSecondProposal(msg *Message) bool {
 	}
 	if err := VerifyCertificateSignatures(m, b.Validates, c.checkValidatorSignature); err != nil {
 		c.sendBlame()
-		c.logger.Warn("Blame sent", "err", err)
+		log.Warn("Blame sent", "err", errInvalidValidates)
 		return false
 	}
 
 	if err := c.verify(b.Block); err != nil {
-		c.logger.Warn("Blame sent", "err", err)
+		log.Warn("Blame sent", "err", errInvalidBlock)
 		c.sendBlame()
 		return false
 	}
 
 	c.handleBlock(b.Block)
 	c.backend.SetStatus(e2c.SteadyState)
-	c.logger.Info("[E2C] View Change completed! Resuming normal operations")
+	log.Info("View Change completed! Resuming normal operations")
 	return true
 }
 
+// this will commit all the blocks up to the highest certificate then reset the block queue
 func (c *core) commitToHighest() {
 	for {
 		block, ok := c.blockQueue.getNext()

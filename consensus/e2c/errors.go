@@ -18,7 +18,6 @@ package e2c
 
 import "errors"
 
-// Add more to this in free time
 var (
 	// ErrUnauthorizedAddress is returned when given address cannot be found in
 	// current validator set.

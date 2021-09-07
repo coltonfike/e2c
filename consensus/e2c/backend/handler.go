@@ -17,8 +17,6 @@
 package backend
 
 import (
-	"errors"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
@@ -30,11 +28,6 @@ const (
 	e2cMsg            = 0x11
 	NewBlockMsg       = 0x07
 	NewBlockHashesMsg = 0x01
-)
-
-var (
-	// errDecodeFailed is returned when decode message fails
-	errDecodeFailed = errors.New("fail to decode e2c message")
 )
 
 // Protocol implements consensus.Engine.Protocol
@@ -86,15 +79,12 @@ func (b *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 		if b.coreStarted {
 			return true, nil
 		}
-		// client nodes want the eth.Handler to run this
+		// client nodes do not handle this message. eth.Handler should call the client handling method while handling this
 		return false, nil
 	}
 	// Likewise, we reject block header announcements sent by fetcher
+	// client also rejects these. This means clients can't accept block headers, only full blocks
 	if msg.Code == NewBlockHashesMsg {
-		if b.coreStarted {
-			return true, nil
-		}
-		//TODO: Maybe the client should handle the block headers?
 		return true, nil
 	}
 	return false, nil

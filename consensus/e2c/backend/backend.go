@@ -18,7 +18,6 @@ package backend
 
 import (
 	"crypto/ecdsa"
-	"errors"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -53,7 +52,6 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 		eventMux:       new(event.TypeMux),
 		privateKey:     privateKey,
 		address:        crypto.PubkeyToAddress(privateKey.PublicKey),
-		logger:         log.New(),
 		db:             db,
 		recents:        recents,
 		coreStarted:    false,
@@ -62,7 +60,7 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 		status:         0,
 		view:           0,
 
-		// @ todo add a timeout feature for clientBlocks
+		// TODO: blocks should time out after a period
 		clientBlocks: make(map[common.Hash]uint64),
 	}
 	backend.core = e2cCore.New(backend, backend.config)
@@ -72,16 +70,12 @@ func New(config *e2c.Config, privateKey *ecdsa.PrivateKey, db ethdb.Database) co
 // ----------------------------------------------------------------------------
 
 type backend struct {
-	config     *e2c.Config
-	eventMux   *event.TypeMux
-	privateKey *ecdsa.PrivateKey
-	address    common.Address
-
-	// @todo only put this in genesis block?
-	validators e2c.Validators
-
+	config      *e2c.Config
+	eventMux    *event.TypeMux
+	privateKey  *ecdsa.PrivateKey
+	address     common.Address
+	validators  e2c.Validators
 	core        e2c.Engine
-	logger      log.Logger
 	db          ethdb.Database
 	chain       consensus.Chain
 	coreStarted bool
@@ -104,6 +98,7 @@ type backend struct {
 	clientBlocks map[common.Hash]uint64
 }
 
+// miner.Worker will call this to see if it should be creating new blocks
 func (b *backend) ShouldMine() bool {
 	return !b.coreStarted || b.Status() != e2c.Wait && b.Leader() == b.Address()
 }
@@ -128,10 +123,12 @@ func (b *backend) Validators() e2c.Validators {
 	return b.validators
 }
 
+// F implements e2c.Backend.F
 func (b *backend) F() uint64 {
 	return b.validators.F()
 }
 
+// View implements e2c.Backend.View
 func (b *backend) View() uint64 {
 	return b.view
 }
@@ -151,7 +148,7 @@ func (b *backend) Broadcast(payload []byte) error {
 	hash := e2c.RLPHash(payload)
 	b.knownMessages.Add(hash, true)
 
-	// build this array so we can use a method
+	// build this array so we can use FindPeers
 	// in eth/handler.go to get a list of consensus.Peer
 	targets := make(map[common.Address]bool)
 	for _, val := range b.validators {
@@ -203,8 +200,7 @@ func (b *backend) Send(payload []byte, addr common.Address) error {
 	ps := b.broadcaster.FindPeers(targets)
 	p, ok := ps[addr]
 	if !ok {
-		// @todo add error for this
-		return errors.New("no peer with given addr")
+		return errUnknownAddress
 	}
 
 	// cache message so we don't resend it
@@ -228,6 +224,7 @@ func (b *backend) Send(payload []byte, addr common.Address) error {
 
 // Commit implements e2c.Backend.Commit
 func (b *backend) Commit(block *types.Block) {
+	log.Info("Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())
 	b.broadcaster.Enqueue(fetcherID, block)
 }
 
@@ -247,9 +244,7 @@ func (b *backend) Verify(block *types.Block) error {
 
 	// Check block body with basic checks
 	if hash := types.DeriveSha(block.Transactions(), new(trie.Trie)); hash != block.TxHash() {
-		return errors.New("block has invalid body")
-		// @todo add this as an error
-		//return errInvalidBlockBody
+		return errInvalidBlockBody
 	}
 
 	// Check block body with basic checks
@@ -260,6 +255,7 @@ func (b *backend) Verify(block *types.Block) error {
 	return b.VerifyHeader(b.chain, block.Header(), false)
 }
 
+// Tells whether the signature on the block is the leaders signature
 func (b *backend) IsSignerLeader(block *types.Block) bool {
 	signer, err := ecrecover(block.Header())
 	if err != nil {
@@ -272,14 +268,14 @@ func (b *backend) IsSignerLeader(block *types.Block) bool {
 func (b *backend) ChangeView() {
 	b.SetStatus(e2c.Wait)
 	b.view++
-	b.logger.Info("View change has been triggered", "leader", b.Leader())
+	log.Info("View change has been triggered", "leader", b.Leader())
 }
 
 // Retrieves the block from the chain for e2c.Core
 func (b *backend) GetBlockFromChain(hash common.Hash) (*types.Block, error) {
 	header := b.chain.GetHeaderByHash(hash)
 	if header == nil {
-		return nil, errors.New("Chain doesn't have block")
+		return nil, errUnknownBlock
 	}
 	return b.chain.GetBlockByNumber(header.Number.Uint64()), nil
 }

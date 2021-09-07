@@ -18,6 +18,7 @@ package core
 
 import (
 	"github.com/ethereum/go-ethereum/consensus/e2c"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // main event loop for core
@@ -40,19 +41,11 @@ func (c *core) loop() {
 			case e2c.MessageEvent:
 				msg := new(Message)
 				if err := msg.FromPayload(ev.Payload, c.checkValidatorSignature); err != nil {
-					c.logger.Error("Failed to decode message", "err", err)
+					log.Error("Failed to decode message", "err", err)
 				} else if c.handleMsg(msg) {
 					c.backend.Broadcast(ev.Payload)
 				}
 			}
-
-			// we have mined a new block: only the leader uses this case
-			/*
-				case block := <-c.blockCh:
-					if err := c.propose(block); err != nil {
-						c.logger.Error("Failed to propose new block", "err", err)
-					}
-			*/
 
 			// this is the case where a blocks timer expired and is ready for commit
 		case <-c.blockQueue.c():
@@ -65,7 +58,7 @@ func (c *core) loop() {
 			// progress timer has expired
 		case <-c.progressTimer.c():
 			if c.backend.Address() != c.backend.Leader() {
-				c.logger.Info("[E2C] Progress Timer expired! Sending Blame message!")
+				log.Info("[E2C] Progress Timer expired! Sending Blame message!")
 				c.sendBlame()
 			}
 
@@ -82,7 +75,7 @@ func (c *core) loop() {
 func (c *core) handleMsg(msg *Message) bool {
 
 	if err := c.verifyMsg(msg); err != nil {
-		c.logger.Error("Failed to verify message", "err", err, "code", msg.Code)
+		log.Error("Failed to verify message", "err", err, "code", msg.Code)
 		return false
 	}
 

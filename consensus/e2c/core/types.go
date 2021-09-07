@@ -17,7 +17,6 @@
 package core
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/ethereum/go-ethereum/core/types"
@@ -91,10 +90,6 @@ func (bc *BlockCertificate) DecodeRLP(s *rlp.Stream) error {
 	}
 	bc.Block, bc.Votes = cert.Block, cert.Votes
 	return nil
-}
-
-func (bc *BlockCertificate) String() string {
-	return fmt.Sprintf("{Number: %v, Hash: %v, Votes: %v}", bc.Block.Number(), bc.Block.Hash().String(), bc.Votes)
 }
 
 type FirstProposal struct {

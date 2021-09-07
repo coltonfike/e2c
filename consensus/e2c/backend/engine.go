@@ -18,7 +18,6 @@ package backend
 
 import (
 	"bytes"
-	"errors"
 	"math/big"
 	"time"
 
@@ -41,36 +40,6 @@ const (
 	inmemorySnapshots  = 128  // Number of recent vote snapshots to keep in memory
 	inmemoryPeers      = 40
 	inmemoryMessages   = 1024
-)
-
-var (
-	// errInvalidSignature is returned when given signature is not signed by given
-	// address.
-	errInvalidSignature = errors.New("invalid signature")
-	// errUnknownBlock is returned when the list of validators is requested for a block
-	// that is not part of the local blockchain.
-	errUnknownBlock = errors.New("unknown block")
-	// errUnauthorized is returned if a header is signed by a non authorized entity.
-	errUnauthorized = errors.New("unauthorized")
-	// errInvalidDifficulty is returned if the difficulty of a block is not 1
-	errInvalidDifficulty = errors.New("invalid difficulty")
-	// errInvalidExtraDataFormat is returned when the extra data format is incorrect
-	errInvalidExtraDataFormat = errors.New("invalid extra data format")
-	// errInvalidMixDigest is returned if a block's mix digest is not Istanbul digest.
-	errInvalidMixDigest = errors.New("invalid e2c mix digest")
-	// errInvalidNonce is returned if a block's nonce is invalid
-	errInvalidNonce = errors.New("invalid nonce")
-	// errInvalidUncleHash is returned if a block contains an non-empty uncle list.
-	errInvalidUncleHash = errors.New("non empty uncle hash")
-	// errInconsistentValidatorSet is returned if the validator set is inconsistent
-	// errInconsistentValidatorSet = errors.New("non empty uncle hash")
-	// errInvalidTimestamp is returned if the timestamp of a block is lower than the previous block's timestamp + the minimum block period.
-	errInvalidTimestamp = errors.New("invalid timestamp")
-	// errInvalidVotingChain is returned if an authorization list is attempted to
-	// be modified via out-of-range or non-contiguous headers.
-	errInvalidVotingChain = errors.New("invalid voting chain")
-	// errInvalidVote is returned if a nonce value is something else that the two
-	// allowed constants of 0x00..0 or 0xff..f.
 )
 
 var (
@@ -354,7 +323,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 	// this bit just forces leader to equivocate. It should
 	// be commented out if running normally
 	if number == 20 && b.Address() == b.validators[0] {
-		b.logger.Info("[E2C] I'm Byzantine Leader that is equivocating")
+		log.Info("I'm Byzantine Leader that is equivocating")
 		head := block.Header() // this returns a copy, not the real value
 		head.Number = big.NewInt(19)
 		bl := types.NewBlock(head, nil, nil, nil, new(trie.Trie))
@@ -368,7 +337,7 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 		return nil
 	}
 	results <- block
-	b.logger.Info("[E2C] Successfully sealed block", "number", block.Number(), "txs", len(block.Transactions()), "hash", block.Hash())
+	log.Info("Successfully sealed block", "number", block.Number(), "txs", len(block.Transactions()), "hash", block.Hash())
 	return nil
 }
 

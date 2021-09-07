@@ -1,12 +1,11 @@
 package core
 
 import (
-	"errors"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/e2c"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // sends a new block to all the nodes
@@ -17,9 +16,12 @@ func (c *core) Propose(block *types.Block) error {
 	}
 
 	// we need to check this here. Eth engine will give duplicate blocks if it gets more transactions
-	if c.committed != nil && block.Number().Uint64() != c.committed.Number().Uint64()+1 && c.backend.Address() != c.backend.Validators()[0] { // last check allows a leader to equivocate for testing
-		return errors.New("given duplicate block")
+	// TODO last check is to allow the leader to equivocate, it MUST be removed for real environments
+	if c.committed != nil && block.Number().Uint64() != c.committed.Number().Uint64()+1 && c.backend.Address() != c.backend.Validators()[0] {
+		return errDuplicateBlock
 	}
+
+	// check if this proposal is a special case and handle accordingly
 	if c.backend.Status() == e2c.FirstProposal {
 		if err := c.sendFirstProposal(block); err != nil {
 			return err
@@ -34,6 +36,7 @@ func (c *core) Propose(block *types.Block) error {
 		return nil
 	}
 
+	// reqular proposal, send the block to all nodes
 	data, err := Encode(block)
 	if err != nil {
 		return err
@@ -51,19 +54,21 @@ func (c *core) Propose(block *types.Block) error {
 // handles a new block proposal by verifying it
 func (c *core) handleProposal(msg *Message) bool {
 
-	if c.backend.Address() == c.backend.Leader() { // leader doesn't do this process
+	// leader shouldn't handle these
+	if c.backend.Address() == c.backend.Leader() {
 		return false
 	}
-	if c.backend.Status() != e2c.SteadyState { // we are currently changing view, ignore all messages
+	// we ignore these if we aren't in steady state. The special cases are handled in view_change.go
+	if c.backend.Status() != e2c.SteadyState {
 		return false
 	}
-	if msg.Address != c.backend.Leader() { // message didn't come from leader
-		// @todo print err
+	// message didn't come from leader
+	if msg.Address != c.backend.Leader() {
 		return false
 	}
 	var block *types.Block
-	if err := msg.Decode(&block); err != nil { // error decoding the message
-		// @todo print err
+	if err := msg.Decode(&block); err != nil {
+		log.Error("Failed to decode proposal", "err", err)
 		return false
 	}
 	if c.blockQueue.contains(block.Hash()) { // we have already handled this block
@@ -72,33 +77,40 @@ func (c *core) handleProposal(msg *Message) bool {
 
 	// verify the block is valid
 	if err := c.verify(block); err != nil {
-		if err == consensus.ErrUnknownAncestor { // blocks may have arrived out of order. Request the block
+		// blocks may have arrived out of order or this node somehow missed a block (possibly joined the network late)
+		// either way, we should request the block to attempt to recover
+		if err == consensus.ErrUnknownAncestor {
 			c.blockQueue.insertUnhandled(block)
 			if err := c.sendRequest(block.ParentHash(), common.Address{}); err != nil {
-				c.logger.Error("Failed to send request", "err", err)
+				log.Error("Failed to send request", "err", err)
 			}
 			return true
-		} else {
+
 			// the block is bad, send blame
+		} else {
+			// equivocation is a special case that requires a unique message
 			if err == errEquivocatingBlocks {
 				equivBlock, ok := c.blockQueue.getByNumber(block.Number().Uint64())
 				if !ok {
 					equivBlock = c.backend.GetBlockByNumber(block.Number().Uint64())
 				}
-				c.logger.Warn("[E2C] Sending Blame", "err", err, "number", block.Number(), "B1 hash", block.Hash(), "B2 hash", equivBlock.Hash())
+				log.Warn("Sending Blame", "err", err, "number", block.Number(), "B1 hash", block.Hash(), "B2 hash", equivBlock.Hash())
 				c.sendEquivBlame(block, equivBlock)
 				return false
 			}
-			c.logger.Warn("[E2C] Sending Blame", "err", err, "number", block.Number())
+			log.Warn("Sending Blame", "err", err, "number", block.Number())
 			c.sendBlame()
 			return false
 		}
 	}
 
+	// the block is valid, insert it into the queue!
 	c.handleBlockAndAncestors(block)
 	return true
 }
 
+// places a block into the queue, then checks if we have any of the blocks ancestors waiting to be handled
+// that could happen when blocks arrive out of order
 func (c *core) handleBlockAndAncestors(block *types.Block) error {
 
 	c.handleBlock(block)
@@ -118,10 +130,11 @@ func (c *core) handleBlockAndAncestors(block *types.Block) error {
 	}
 }
 
+// handles a single block by adding it to the queue and extending the progress timer
 func (c *core) handleBlock(block *types.Block) {
 
 	// block is good, add to progress timer and insert this block to our queue
-	c.logger.Info("[E2C] Valid block received", "number", block.Number().Uint64(), "hash", block.Hash())
+	log.Info("Valid block received", "number", block.Number().Uint64(), "hash", block.Hash())
 	c.progressTimer.AddDuration(2)
 	c.blockQueue.insertHandled(block)
 	c.lock = block

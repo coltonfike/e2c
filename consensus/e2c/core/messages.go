@@ -17,7 +17,6 @@
 package core
 
 import (
-	"errors"
 	"fmt"
 	"io"
 
@@ -169,7 +168,7 @@ func VerifyCertificateSignatures(msg *Message, sigs [][]byte, validateFn func([]
 			return err
 		}
 		if _, ok := unique[addr]; ok {
-			return errors.New("signatures not all unique")
+			return errNonuniqueSignatures
 		}
 		unique[addr] = true
 	}
@@ -179,7 +178,7 @@ func VerifyCertificateSignatures(msg *Message, sigs [][]byte, validateFn func([]
 // ensures the message is from correct view
 func (c *core) verifyMsg(msg *Message) error {
 	if msg.View != c.backend.View() && !(msg.Code == RequestBlockMsg || msg.Code == RespondMsg) {
-		return errors.New("msg from different view")
+		return errDifferentView
 	}
 	return nil
 }

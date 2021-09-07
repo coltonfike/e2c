@@ -4,6 +4,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // this is called by eth.Handler. We count how many acks we have received and return true when the block should be committed
@@ -30,7 +31,7 @@ func (b *backend) ClientVerify(block *types.Block, addr common.Address, chain co
 		b.clientBlocks[block.Hash()] = 1
 	}
 
-	b.logger.Info("[E2C] Block acknowledgement received", "number", block.Number(), "hash", block.Hash(), "total acks", b.clientBlocks[block.Hash()])
+	log.Info("Block acknowledgement received", "number", block.Number(), "hash", block.Hash(), "acks", b.clientBlocks[block.Hash()])
 	if b.clientBlocks[block.Hash()] == b.F()+1 {
 		// Delete the parent block. If we delete the one we just committed
 		// then we will probably see it again since we commit at F+1 acks
@@ -38,8 +39,8 @@ func (b *backend) ClientVerify(block *types.Block, addr common.Address, chain co
 		// Memory errors. So instead we delete the parent since we shouldn't
 		// See that block anymore. We could add a timeout function to delete
 		// after a set interval
+		log.Info("Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())
 		delete(b.clientBlocks, block.ParentHash())
-		b.logger.Info("[E2C] Client committed block", "number", block.Number(), "hash", block.Hash())
 		return true
 	}
 

@@ -17,7 +17,6 @@
 package core
 
 import (
-	"errors"
 	"sync"
 	"time"
 
@@ -28,16 +27,11 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-var (
-	errEquivocatingBlocks = errors.New("equivocation detected")
-)
-
 // New creates an E2C consensus core
 func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
 	c := &core{
 		config:     config,
 		handlerWg:  new(sync.WaitGroup),
-		logger:     log.New(),
 		backend:    backend,
 		blockQueue: NewBlockQueue(config.Delta),
 		blame:      make(map[common.Address][]byte),
@@ -52,7 +46,6 @@ func New(backend e2c.Backend, config *e2c.Config) e2c.Engine {
 
 type core struct {
 	config *e2c.Config
-	logger log.Logger
 
 	progressTimer *ProgressTimer // tracks the progress of leader
 	votingTimer   *time.Timer    // this is only used in view change to wait the 4 delta
@@ -91,18 +84,6 @@ func (c *core) Stop() error {
 	return nil
 }
 
-// this will search our data structures for the block. It's called by VerifyHeader in backend
-// it shouldn't cause any race conditions as the call for this only exists in an if inside VerifyHeader.
-// that if only executes if the caller to VerifyHeader was the core event loop, which means there won't be
-// concurrent access
-func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
-	b, ok := c.blockQueue.get(hash)
-	if ok {
-		return b.Header(), nil
-	}
-	return nil, errors.New("unknown block")
-}
-
 // adds the event to the eventmux
 func (c *core) subscribeEvents() {
 	c.eventMux = c.backend.EventMux().Subscribe(
@@ -113,6 +94,18 @@ func (c *core) subscribeEvents() {
 // clear events from eventmux
 func (c *core) unsubscribeEvents() {
 	c.eventMux.Unsubscribe()
+}
+
+// this will search our data structures for the block. It's called by VerifyHeader in backend
+// it shouldn't cause any race conditions as the call for this only exists in an if inside VerifyHeader.
+// that if only executes if the caller to VerifyHeader was the core event loop, which means there won't be
+// concurrent access
+func (c *core) GetQueuedBlock(hash common.Hash) (*types.Header, error) {
+	b, ok := c.blockQueue.get(hash)
+	if ok {
+		return b.Header(), nil
+	}
+	return nil, errUnknownBlock
 }
 
 // check that blocks are valid
@@ -128,10 +121,8 @@ func (c *core) verify(block *types.Block) error {
 
 // add the block to the chain
 func (c *core) commit(block *types.Block) {
-
 	c.backend.Commit(block)
 	c.committed = block
-	c.logger.Info("[E2C] Successfully committed block", "number", block.Number().Uint64(), "txs", len(block.Transactions()), "hash", block.Hash())
 }
 
 // this signs the message and adds the view and addess to the packet
@@ -151,12 +142,12 @@ func (c *core) finalizeMessage(msg *Message) ([]byte, error) {
 func (c *core) broadcast(msg *Message) {
 	payload, err := c.finalizeMessage(msg)
 	if err != nil {
-		c.logger.Error("Failed to finalize message", "msg", msg, "err", err)
+		log.Error("Failed to finalize message", "msg", msg, "err", err)
 		return
 	}
 
 	if err = c.backend.Broadcast(payload); err != nil {
-		c.logger.Error("Failed to broadcast message", "msg", msg, "err", err)
+		log.Error("Failed to broadcast message", "msg", msg, "err", err)
 		return
 	}
 }
@@ -165,12 +156,12 @@ func (c *core) broadcast(msg *Message) {
 func (c *core) send(msg *Message, addr common.Address) {
 	payload, err := c.finalizeMessage(msg)
 	if err != nil {
-		c.logger.Error("Failed to finalize message", "msg", msg, "err", err)
+		log.Error("Failed to finalize message", "msg", msg, "err", err)
 		return
 	}
 
 	if err = c.backend.Send(payload, addr); err != nil {
-		c.logger.Error("Failed to send message", "msg", msg, "err", err, "addr", addr)
+		log.Error("Failed to send message", "msg", msg, "err", err, "addr", addr)
 		return
 	}
 }
