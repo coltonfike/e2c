@@ -39,10 +39,14 @@ function send() {
     to: randAddr(),
     gas: 21000,
     nonce: nonce,
+  }).on('error', function(error) {
+    console.log(error)
   }).on('receipt', function() {
     pending--;
     completedTxns++;
+    console.log("Completed: " + completedTxns);
   });
+  console.log("Sent: " + nonce)
   nonce++;
   sent++;
 }
@@ -88,11 +92,11 @@ async function txnHandler() {
 }
 
 async function contractHandler() {
-  while (completedContracts < totalContractsToSend) {
-    pending++;
-    sendContract();
-    await sleep(5);
-  }
+  // while (completedContracts < totalContractsToSend) {
+  // pending++;
+  // sendContract();
+  // await sleep(5);
+  // }
   contractHandlerComplete = true;
 }
 
