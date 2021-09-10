@@ -19,5 +19,5 @@ func (v Validators) GetByAddress(addr common.Address) (int, common.Address) {
 }
 
 func (v Validators) F() uint64 {
-	return uint64(math.Ceil(float64(len(v) / 2)))
+	return uint64(math.Floor(float64((len(v) - 1) / 2)))
 }
