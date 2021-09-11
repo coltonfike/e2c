@@ -17,7 +17,8 @@ func (c *core) Propose(block *types.Block) error {
 
 	// we need to check this here. Eth engine will give duplicate blocks if it gets more transactions
 	// TODO last check is to allow the leader to equivocate, it MUST be removed for real environments
-	if c.committed != nil && block.Number().Uint64() != c.committed.Number().Uint64()+1 && c.backend.Address() != c.backend.Validators()[0] {
+	//if c.committed != nil && block.Number().Uint64() != c.committed.Number().Uint64()+1 && c.backend.Address() != c.backend.Validators()[0] {
+	if c.committed != nil && block.Number().Uint64() != c.committed.Number().Uint64()+1 {
 		return errDuplicateBlock
 	}
 

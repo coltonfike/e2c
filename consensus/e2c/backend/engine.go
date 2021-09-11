@@ -322,16 +322,16 @@ func (b *backend) Seal(chain consensus.ChainHeaderReader, block *types.Block, re
 
 	// this bit just forces leader to equivocate. It should
 	// be commented out if running normally
-	if number == 20 && b.Address() == b.validators[0] {
-		log.Info("I'm Byzantine Leader that is equivocating")
-		head := block.Header() // this returns a copy, not the real value
-		head.Number = big.NewInt(19)
-		bl := types.NewBlock(head, nil, nil, nil, new(trie.Trie))
-		bl, _ = b.updateBlock(parent, bl)
-		b.core.Propose(bl)
-		results <- block
-		return nil
-	}
+	// if number == 20 && b.Address() == b.validators[0] {
+	// log.Info("I'm Byzantine Leader that is equivocating")
+	// head := block.Header() // this returns a copy, not the real value
+	// head.Number = big.NewInt(19)
+	// bl := types.NewBlock(head, nil, nil, nil, new(trie.Trie))
+	// bl, _ = b.updateBlock(parent, bl)
+	// b.core.Propose(bl)
+	// results <- block
+	// return nil
+	// }
 
 	if err := b.core.Propose(block); err != nil {
 		return nil
