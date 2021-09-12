@@ -198,7 +198,10 @@ type worker struct {
 	fullTaskHook func()                             // Method to call before pushing the full sealing task.
 	resubmitHook func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
 
-	e2c bool
+	// e2c vars
+	blockSize uint64
+	delta     time.Duration
+	e2c       bool
 }
 
 func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(*types.Block) bool, init bool) *worker {
@@ -231,6 +234,8 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	if istanbul || e2c || !chainConfig.IsQuorum || chainConfig.Clique != nil {
 		if e2c {
 			worker.e2c = true
+			worker.delta = chainConfig.E2C.Delta
+			worker.blockSize = chainConfig.E2C.BlockSize
 		}
 		// Subscribe NewTxsEvent for tx pool
 		worker.txsSub = eth.TxPool().SubscribeNewTxsEvent(worker.txsCh)
@@ -244,7 +249,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 			recommit = minRecommitInterval
 		}
 		if worker.e2c {
-			recommit = 200 * time.Millisecond
+			recommit = worker.delta * time.Millisecond
 		}
 
 		go worker.mainLoop()
@@ -566,8 +571,8 @@ func (w *worker) mainLoop() {
 			}
 			atomic.AddInt32(&w.newTxs, int32(len(ev.Txs)))
 
-			// when e2c gets 200 txs, it should commit
-			if w.e2c && atomic.LoadInt32(&w.newTxs) > 200 {
+			// when e2c gets blockSize txs, it should commit
+			if w.e2c && atomic.LoadInt32(&w.newTxs) > int32(w.blockSize) {
 				w.commitNewWork(nil, false, time.Now().Unix())
 			}
 
@@ -1091,7 +1096,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	// empty block is necessary to keep the liveness of the network.
 
 	// noempty means the exact opposite for e2c. noempty being true actually means make an empty block
-	if (w.e2c && atomic.LoadInt32(&w.newTxs) < 200 && !noempty) || (!w.e2c && len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0) {
+	if (w.e2c && atomic.LoadInt32(&w.newTxs) < int32(w.blockSize) && !noempty) || (!w.e2c && len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0) {
 		w.updateSnapshot()
 		return
 	}

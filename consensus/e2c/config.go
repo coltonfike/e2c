@@ -20,12 +20,12 @@ import "time"
 
 type Config struct {
 	Delta                  time.Duration `toml:",omitempty"` // Network speed
-	F                      uint64        `toml:",omitempty"` // Should delete this after client doesn't need it anymore
+	BlockSize              uint64        `toml:",omitempty"` // Determines how many transactions go in each block
 	AllowedFutureBlockTime uint64        `toml:",omitempty"` // This is required by miner, even though we don't use it
 }
 
 var DefaultConfig = &Config{
-	Delta:                  1000,
-	F:                      1,
+	Delta:                  200,
+	BlockSize:              200,
 	AllowedFutureBlockTime: 0,
 }

@@ -389,9 +389,9 @@ func (c *IstanbulConfig) String() string {
 }
 
 type E2CConfig struct {
-	Period uint64        `json:"period"`
-	Delta  time.Duration `json:"delta"`
-	F      uint64        `json:"f"`
+	Period    uint64        `json:"period"`
+	Delta     time.Duration `json:"delta"`
+	BlockSize uint64        `json:"blockSize"`
 }
 
 // String implements the stringer interface, returning the consensus engine details.

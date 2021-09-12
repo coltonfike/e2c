@@ -312,7 +312,7 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 	}
 	if chainConfig.E2C != nil {
 		config.E2C.Delta = chainConfig.E2C.Delta
-		config.E2C.F = chainConfig.E2C.F
+		config.E2C.BlockSize = chainConfig.E2C.BlockSize
 		config.Istanbul.AllowedFutureBlockTime = config.Miner.AllowedFutureBlockTime //Quorum
 
 		return e2cBackend.New(&config.E2C, stack.GetNodeKey(), db)
