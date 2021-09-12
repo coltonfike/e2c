@@ -131,11 +131,15 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
-	// changes to manipulate the chain id for migration from 2.0.2 and below version to 2.0.3
-	// version of Quorum  - this is applicable for v2.0.3 onwards
 	if chainConfig.IsQuorum {
+		// changes to manipulate the chain id for migration from 2.0.2 and below version to 2.0.3
+		// version of Quorum  - this is applicable for v2.0.3 onwards
 		if (chainConfig.ChainID != nil && chainConfig.ChainID.Int64() == 1) || config.NetworkId == 1 {
 			return nil, errors.New("Cannot have chain id or network id as 1.")
+		}
+
+		if config.QuorumChainConfig.PrivacyMarkerEnabled() && chainConfig.PrivacyPrecompileBlock == nil {
+			return nil, errors.New("Privacy marker transactions require privacyPrecompileBlock to be set in genesis.json")
 		}
 	}
 
@@ -213,20 +217,20 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			TrieDirtyDisabled:   config.NoPruning,
 			TrieTimeLimit:       config.TrieTimeout,
 			SnapshotLimit:       config.SnapshotCache,
+			Preimages:           config.Preimages,
+			// Quorum
+			PrivateTrieCleanJournal: stack.ResolvePath(config.PrivateTrieCleanCacheJournal),
 		}
 	)
 	newBlockChainFunc := core.NewBlockChain
-	if config.EnableMultitenancy {
+	if config.QuorumChainConfig.MultiTenantEnabled() {
 		newBlockChainFunc = core.NewMultitenantBlockChain
 	}
-	eth.blockchain, err = newBlockChainFunc(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
-
-	// Quorum
-	eth.blockchain.SetSaveRevertReason(config.SaveRevertReason)
-
+	eth.blockchain, err = newBlockChainFunc(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit, &config.QuorumChainConfig)
 	if err != nil {
 		return nil, err
 	}
+
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
@@ -254,13 +258,14 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	hexNodeId := fmt.Sprintf("%x", crypto.FromECDSAPub(&stack.GetNodeKey().PublicKey)[1:]) // Quorum
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), eth, nil, hexNodeId, config.EVMCallTimeOut}
+
 	gpoParams := config.GPO
 	if gpoParams.Default == nil {
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 
-	eth.dialCandidates, err = eth.setupDiscovery(&stack.Config().P2P)
+	eth.dialCandidates, err = eth.setupDiscovery()
 	if err != nil {
 		return nil, err
 	}
@@ -304,9 +309,10 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 		if chainConfig.Istanbul.Epoch != 0 {
 			config.Istanbul.Epoch = chainConfig.Istanbul.Epoch
 		}
-		config.Istanbul.ProposerPolicy = istanbul.ProposerPolicy(chainConfig.Istanbul.ProposerPolicy)
+		config.Istanbul.ProposerPolicy = istanbul.NewProposerPolicy(istanbul.ProposerPolicyId(chainConfig.Istanbul.ProposerPolicy))
 		config.Istanbul.Ceil2Nby3Block = chainConfig.Istanbul.Ceil2Nby3Block
 		config.Istanbul.AllowedFutureBlockTime = config.Miner.AllowedFutureBlockTime //Quorum
+		config.Istanbul.TestQBFTBlock = chainConfig.Istanbul.TestQBFTBlock
 
 		return istanbulBackend.New(&config.Istanbul, stack.GetNodeKey(), db)
 	}

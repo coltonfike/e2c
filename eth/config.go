@@ -82,8 +82,12 @@ var DefaultConfig = Config{
 	GPO:         DefaultFullGPOConfig,
 	RPCTxFeeCap: 1, // 1 ether
 
-	Istanbul: *istanbul.DefaultConfig, // Quorum
-	E2C:      *e2c.DefaultConfig,      // Quorum
+	// Quorum
+	Istanbul:                     *istanbul.DefaultConfig, // Quorum
+	PrivateTrieCleanCacheJournal: "privatetriecache",
+
+	// E2C
+	E2C: *e2c.DefaultConfig,
 }
 
 func init() {
@@ -154,6 +158,7 @@ type Config struct {
 	TrieDirtyCache          int
 	TrieTimeout             time.Duration
 	SnapshotCache           int
+	Preimages               bool
 
 	// Mining options
 	Miner miner.Config
@@ -203,8 +208,8 @@ type Config struct {
 	EVMCallTimeOut time.Duration
 
 	// Quorum
-	EnableMultitenancy bool `toml:"-"`
+	core.QuorumChainConfig `toml:"-"`
 
 	// Quorum
-	SaveRevertReason bool `toml:"-"`
+	PrivateTrieCleanCacheJournal string `toml:",omitempty"` // Disk journal directory for private trie cache to survive node restarts
 }
