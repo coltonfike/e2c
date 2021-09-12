@@ -84,10 +84,10 @@ var DefaultConfig = Config{
 
 	// Quorum
 	Istanbul:                     *istanbul.DefaultConfig, // Quorum
-	PrivateTrieCleanCacheJournal: "privatetriecache"
-  
-  // E2C
-	E2C:      *e2c.DefaultConfig,
+	PrivateTrieCleanCacheJournal: "privatetriecache",
+
+	// E2C
+	E2C: *e2c.DefaultConfig,
 }
 
 func init() {
