@@ -182,7 +182,7 @@ func (s *Ethereum) quorumConsensusProtocols() []p2p.Protocol {
 // istanbul/64, istanbul/99, clique/63, clique/64 all override the "eth" subprotocol.
 func isLegacyProtocol(name string, version uint) bool {
 	// protocols that override "eth" subprotocol and run only the quorum subprotocol.
-	quorumLegacyProtocols := map[string][]uint{"istanbul": {64, 99}, "clique": {63, 64}}
+	quorumLegacyProtocols := map[string][]uint{"istanbul": {64, 99}, "clique": {63, 64}, "e2c": {64, 99}}
 	for lpName, lpVersions := range quorumLegacyProtocols {
 		if lpName == name {
 			for _, v := range lpVersions {

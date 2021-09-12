@@ -56,6 +56,11 @@ type ChainReader interface {
 	GetBlock(hash common.Hash, number uint64) *types.Block
 }
 
+type Chain interface {
+	ChainReader
+	GetBlockByNumber(uint64) *types.Block
+}
+
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
 	// Author retrieves the Ethereum address of the account that minted the given
@@ -155,4 +160,18 @@ type Istanbul interface {
 
 	// Stop stops the engine
 	Stop() error
+}
+
+type E2C interface {
+	Engine
+
+	// Start starts the engine
+	Start(chain Chain) error
+
+	// Stop stops the engine
+	Stop() error
+
+	ShouldMine() bool
+
+	ClientVerify(*types.Block, common.Address, ChainHeaderReader) bool
 }

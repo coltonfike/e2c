@@ -583,8 +583,8 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 	var (
 		status63    statusData63 // safe to read after two values have been received from errc
 		status      statusData   // safe to read after two values have been received from errc
-		istanbulOld = protocolName == "istanbul" && p.version == consensus.Istanbul64
-		istanbulNew = protocolName == "istanbul" && p.version == consensus.Istanbul99
+		istanbulOld = (protocolName == "istanbul" || protocolName == "e2c") && p.version == consensus.Istanbul64
+		istanbulNew = (protocolName == "istanbul" || protocolName == "e2c") && p.version == consensus.Istanbul99
 	)
 	go func() {
 		switch {

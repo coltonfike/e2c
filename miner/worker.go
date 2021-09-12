@@ -45,7 +45,7 @@ const (
 
 	// txChanSize is the size of channel listening to NewTxsEvent.
 	// The number is referenced from the size of tx pool.
-	txChanSize = 4096
+	txChanSize = 10000
 
 	// chainHeadChanSize is the size of channel listening to ChainHeadEvent.
 	chainHeadChanSize = 10
@@ -197,6 +197,11 @@ type worker struct {
 	skipSealHook func(*task) bool                   // Method to decide whether skipping the sealing.
 	fullTaskHook func()                             // Method to call before pushing the full sealing task.
 	resubmitHook func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
+
+	// e2c vars
+	blockSize uint64
+	delta     time.Duration
+	e2c       bool
 }
 
 func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(*types.Block) bool, init bool) *worker {
@@ -222,8 +227,16 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		startCh:            make(chan struct{}, 1),
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
+		e2c:                false,
 	}
-	if _, ok := engine.(consensus.Istanbul); ok || !chainConfig.IsQuorum || chainConfig.Clique != nil {
+	_, istanbul := engine.(consensus.Istanbul)
+	_, e2c := engine.(consensus.E2C)
+	if istanbul || e2c || !chainConfig.IsQuorum || chainConfig.Clique != nil {
+		if e2c {
+			worker.e2c = true
+			worker.delta = chainConfig.E2C.Delta
+			worker.blockSize = chainConfig.E2C.BlockSize
+		}
 		// Subscribe NewTxsEvent for tx pool
 		worker.txsSub = eth.TxPool().SubscribeNewTxsEvent(worker.txsCh)
 		// Subscribe events for blockchain
@@ -234,6 +247,9 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		if recommit < minRecommitInterval {
 			log.Warn("Sanitizing miner recommit interval", "provided", recommit, "updated", minRecommitInterval)
 			recommit = minRecommitInterval
+		}
+		if worker.e2c {
+			recommit = worker.delta * time.Millisecond
 		}
 
 		go worker.mainLoop()
@@ -308,6 +324,9 @@ func (w *worker) start() {
 	if istanbul, ok := w.engine.(consensus.Istanbul); ok {
 		istanbul.Start(w.chain, w.chain.CurrentBlock, w.chain.HasBadBlock)
 	}
+	if e2c, ok := w.engine.(consensus.E2C); ok {
+		e2c.Start(w.chain)
+	}
 	w.startCh <- struct{}{}
 }
 
@@ -315,6 +334,9 @@ func (w *worker) start() {
 func (w *worker) stop() {
 	if istanbul, ok := w.engine.(consensus.Istanbul); ok {
 		istanbul.Stop()
+	}
+	if e2c, ok := w.engine.(consensus.E2C); ok {
+		e2c.Stop()
 	}
 	atomic.StoreInt32(&w.running, 0)
 }
@@ -373,7 +395,11 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 		interrupt = new(int32)
 		w.newWorkCh <- &newWorkReq{interrupt: interrupt, noempty: noempty, timestamp: timestamp}
 		timer.Reset(recommit)
-		atomic.StoreInt32(&w.newTxs, 0)
+
+		// e2c will change this on it's own. Dont' do it here
+		if w.e2c {
+			atomic.StoreInt32(&w.newTxs, 0)
+		}
 	}
 	// clearPending cleans the stale pending tasks.
 	clearPending := func(number uint64) {
@@ -406,7 +432,9 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			// higher priced transactions. Disable this overhead for pending blocks.
 			if w.isRunning() && (w.chainConfig.Clique == nil || w.chainConfig.Clique.Period > 0) {
 				// Short circuit if no new transaction arrives.
-				if atomic.LoadInt32(&w.newTxs) == 0 {
+
+				// e2c should commit empty block when this happens
+				if !w.e2c && atomic.LoadInt32(&w.newTxs) == 0 {
 					timer.Reset(recommit)
 					continue
 				}
@@ -414,33 +442,39 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			}
 
 		case interval := <-w.resubmitIntervalCh:
-			// Adjust resubmit interval explicitly by user.
-			if interval < minRecommitInterval {
-				log.Warn("Sanitizing miner recommit interval", "provided", interval, "updated", minRecommitInterval)
-				interval = minRecommitInterval
-			}
-			log.Info("Miner recommit interval update", "from", minRecommit, "to", interval)
-			minRecommit, recommit = interval, interval
+			// never readjust for e2c
+			if !w.e2c {
+				// Adjust resubmit interval explicitly by user.
+				if interval < minRecommitInterval {
+					log.Warn("Sanitizing miner recommit interval", "provided", interval, "updated", minRecommitInterval)
+					interval = minRecommitInterval
+				}
+				log.Info("Miner recommit interval update", "from", minRecommit, "to", interval)
+				minRecommit, recommit = interval, interval
 
-			if w.resubmitHook != nil {
-				w.resubmitHook(minRecommit, recommit)
+				if w.resubmitHook != nil {
+					w.resubmitHook(minRecommit, recommit)
+				}
 			}
 
 		case adjust := <-w.resubmitAdjustCh:
-			// Adjust resubmit interval by feedback.
-			if adjust.inc {
-				before := recommit
-				target := float64(recommit.Nanoseconds()) / adjust.ratio
-				recommit = recalcRecommit(minRecommit, recommit, target, true)
-				log.Trace("Increase miner recommit interval", "from", before, "to", recommit)
-			} else {
-				before := recommit
-				recommit = recalcRecommit(minRecommit, recommit, float64(minRecommit.Nanoseconds()), false)
-				log.Trace("Decrease miner recommit interval", "from", before, "to", recommit)
-			}
+			// never readjust for e2c
+			if !w.e2c {
+				// Adjust resubmit interval by feedback.
+				if adjust.inc {
+					before := recommit
+					target := float64(recommit.Nanoseconds()) / adjust.ratio
+					recommit = recalcRecommit(minRecommit, recommit, target, true)
+					log.Trace("Increase miner recommit interval", "from", before, "to", recommit)
+				} else {
+					before := recommit
+					recommit = recalcRecommit(minRecommit, recommit, float64(minRecommit.Nanoseconds()), false)
+					log.Trace("Decrease miner recommit interval", "from", before, "to", recommit)
+				}
 
-			if w.resubmitHook != nil {
-				w.resubmitHook(minRecommit, recommit)
+				if w.resubmitHook != nil {
+					w.resubmitHook(minRecommit, recommit)
+				}
 			}
 
 		case <-w.exitCh:
@@ -536,6 +570,11 @@ func (w *worker) mainLoop() {
 				}
 			}
 			atomic.AddInt32(&w.newTxs, int32(len(ev.Txs)))
+
+			// when e2c gets blockSize txs, it should commit
+			if w.e2c && atomic.LoadInt32(&w.newTxs) > int32(w.blockSize) {
+				w.commitNewWork(nil, false, time.Now().Unix())
+			}
 
 			// System stopped
 		case <-w.exitCh:
@@ -971,6 +1010,12 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	if e2c, ok := w.engine.(consensus.E2C); ok {
+		if !e2c.ShouldMine() {
+			return
+		}
+	}
+
 	tstart := time.Now()
 	parent := w.chain.CurrentBlock()
 
@@ -1058,7 +1103,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
-	if !noempty && atomic.LoadUint32(&w.noempty) == 0 {
+	if !w.e2c && !noempty && atomic.LoadUint32(&w.noempty) == 0 {
 		w.commit(uncles, nil, false, tstart)
 	}
 
@@ -1071,7 +1116,9 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
-	if len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0 {
+
+	// noempty means the exact opposite for e2c. noempty being true actually means make an empty block
+	if (w.e2c && atomic.LoadInt32(&w.newTxs) < int32(w.blockSize) && !noempty) || (!w.e2c && len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0) {
 		w.updateSnapshot()
 		return
 	}

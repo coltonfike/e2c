@@ -792,6 +792,16 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		request.Block.ReceivedAt = msg.ReceivedAt
 		request.Block.ReceivedFrom = p
 
+		// e2c runs clients difficulty than eth. Call the e2c client method to handle it
+		// it'll return true if the block should be committed
+		if e2c, ok := pm.engine.(consensus.E2C); ok {
+			pubKey := p.Node().Pubkey()
+			addr := crypto.PubkeyToAddress(*pubKey)
+			if !e2c.ClientVerify(request.Block, addr, pm.blockchain) {
+				return nil
+			}
+		}
+
 		// Mark the peer as owning the block and schedule it for import
 		p.MarkBlock(request.Block.Hash())
 		pm.blockFetcher.Enqueue(p.id, request.Block)
@@ -906,8 +916,17 @@ func (pm *ProtocolManager) BroadcastBlock(block *types.Block, propagate bool) {
 			log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
 			return
 		}
-		// Send the block to a subset of our peers
-		transfer := peers[:int(math.Sqrt(float64(len(peers))))]
+
+		var transfer []*peer
+		// E2C sends to all peers, not just a subset
+		if _, ok := pm.engine.(consensus.E2C); ok {
+			// Send the block to all peers
+			transfer = peers
+		} else {
+			// Send the block to a subset of our peers
+			transfer = peers[:int(math.Sqrt(float64(len(peers))))]
+		}
+
 		for _, peer := range transfer {
 			peer.AsyncSendNewBlock(block, td)
 		}
@@ -1043,6 +1062,8 @@ func (pm *ProtocolManager) getConsensusAlgorithm() string {
 		switch pm.engine.(type) {
 		case consensus.Istanbul:
 			consensusAlgo = "istanbul"
+		case consensus.E2C:
+			consensusAlgo = "e2c"
 		case *clique.Clique:
 			consensusAlgo = "clique"
 		case *ethash.Ethash:
