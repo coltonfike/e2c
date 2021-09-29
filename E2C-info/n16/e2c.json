@@ -11,9 +11,8 @@
         "petersburgBlock": 0,
         "istanbulBlock": 0,
         "e2c": {
-            "period": 0,
             "delta": 200,
-            "f": 2
+            "blockSize": 200
         },
         "txnSizeLimit": 64,
         "maxCodeSize": 0,
