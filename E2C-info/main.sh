@@ -21,7 +21,7 @@ rm -r $DIR/*/geth
 
 cd ../cmd/geth
 go install
-cd ../../testdata
+cd ../../E2C-info
 
 for i in $(seq 0 1 $NUM_NODES); do
   init $i $GENESIS
