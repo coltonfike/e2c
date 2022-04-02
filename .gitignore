@@ -52,3 +52,7 @@ profile.cov
 
 # QUORUM
 generated-release-notes.md
+
+# E2C
+/testnet/logs/logs_*
+/testnet/n*/*/geth
