@@ -1,12 +1,11 @@
 import asyncio
-import concurrent.futures as cf
-import threading
 import time
 from random import randint
 from sys import argv
-from web3.middleware import geth_poa_middleware
 
 import web3 as w3
+from web3.middleware import geth_poa_middleware
+from solcx import compile_source
 
 
 class Node:
@@ -26,9 +25,46 @@ class Node:
         self.nonce = 0
         self.to_send = to_send
         self.total = 0
-        self.latency = 0
-        self.pending = {}
+        self.pending = []
         self.block_filter = self.web3.eth.filter('latest')
+
+        compiled_sol = compile_source(
+            '''
+            pragma solidity >0.5.0;
+
+                contract Greeter {
+                string public greeting;
+
+                constructor() public {
+                    greeting = 'Hello';
+                }
+
+                function setGreeting(string memory _greeting) public {
+                    greeting = _greeting;
+                }
+
+                function greet() view public returns (string memory) {
+                    return greeting;
+                }
+            }
+            ''',
+            output_values=['abi', 'bin']
+        )
+
+        contract_id, contract_interface = compiled_sol.popitem()
+        bytecode = contract_interface['bin']
+        abi = contract_interface['abi']
+
+        Greeter = self.web3.eth.contract(abi=abi, bytecode=bytecode)
+        tx_hash = Greeter.constructor().transact({
+            'from': self.my_addr,
+            'gas': 1000000,
+            'nonce': self.nonce
+        })
+        self.nonce += 1
+        tx_receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash)
+        self.greeter = self.web3.eth.contract(
+            address=tx_receipt.contractAddress, abi=abi)
 
     def rand_addr(self):
         r = randint(0, len(self.addresses) - 2)
@@ -37,47 +73,15 @@ class Node:
         return self.addresses[r]
 
     def send(self):
-        to_addr = self.rand_addr()
-        from_addr = self.my_addr
-        return self.web3.eth.send_transaction({
-            'to': to_addr,
-            'from': from_addr,
-            'value': 100000,
-            'gas': 21000,
-            'nonce': self.nonce
-        })
-
-    async def block_handler(self, poll_interval):
-        t = time.time()
-        while True:
-            blocks = self.block_filter.get_new_entries()
-            for block in blocks:
-                b = self.web3.eth.get_block(block)
-                for txn in b['transactions']:
-                    try:
-                        self.latency += time.time() - self.pending[bytes(txn)]
-                        self.total += 1
-                        self.pending.pop(txn)
-                    except KeyError:
-                        # transaction wasn't sent by this node
-                        continue
-                    except Exception as e:
-                        print(e)
-                        exit(1)
-            if time.time() - t > 30:
-                print('Average latency: ' +
-                      str(self.latency / self.total) + ' seconds')
-                return
-            await asyncio.sleep(poll_interval)
+        return self.greeter.functions.greet().call({'from': self.my_addr})
 
     async def run(self, poll_interval):
         t = time.time()
         while True:
             if time.time() - t > 30:
                 return
-            txn = self.send()
+            _ = self.send()
             self.nonce += 1
-            self.pending[txn] = time.time()
             await asyncio.sleep(poll_interval)
 
     def start(self):
@@ -85,11 +89,7 @@ class Node:
         asyncio.set_event_loop(loop)
         t1 = time.time()
         try:
-            if self.index == 1:
-                loop.run_until_complete(
-                    asyncio.gather(self.block_handler(.1), self.run(.0000001)))
-            else:
-                loop.run_until_complete(self.run(.0000001))
+            loop.run_until_complete(self.run(1))
         finally:
             loop.close()
         return time.time() - t1

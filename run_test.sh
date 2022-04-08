@@ -43,7 +43,7 @@ run_client client $port $ws_port
 sleep 10
 
 # start the client accounts to send transactions
-python3 main.py '0xe2ddab5e77df6d62f8661650e46d695be1963bf7' 'client' 10000 10000 $ws_port &
+python3 contract.py '0xe2ddab5e77df6d62f8661650e46d695be1963bf7' 'client' 10000 10000 $ws_port &
 python3 main.py '0xd18aefd325d127fe3e1d6272180a8629413ddc6b' 'password' 10000 10000 $ws_port &
 python3 main.py '0xcf7d7b22af30aadce47930cd234ed34c4488da5e' 'password' 10000 10000 $ws_port &
 python3 main.py '0x82aa48615b89237a0195441da44a63dcbf199f21' 'password' 10000 10000 $ws_port &
